@@ -1,5 +1,8 @@
 import sys
 import os
+import io
+import zipfile
+import xml.etree.ElementTree as ET
 import cv2
 import numpy as np
 import trimesh
@@ -106,12 +109,76 @@ QLabel {
 }
 """
 
+# ---------------------------------------------------------------------------
+# .3MF EXPORT — XML skeleton constants (Bambu Studio / PrusaSlicer compatible)
+# ---------------------------------------------------------------------------
+_3MF_CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+  <Default Extension="stl" ContentType="application/octet-stream"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"""
+
+_3MF_RELS = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"
+    Target="/3D/model.stl"/>
+</Relationships>"""
+
+
+def export_3mf(mesh, output_path_3mf, color_changes_z):
+    """
+    Exports a trimesh mesh as a .3mf archive compatible with Bambu Studio / PrusaSlicer.
+
+    The archive embeds the binary STL geometry and a Bambu_model_settings.xml
+    metadata file containing one <color_change> node per Z height supplied,
+    which triggers an automatic M600 (filament swap) pause during slicing.
+
+    Args:
+        mesh (trimesh.Trimesh): The fully-built, watertight mesh object.
+        output_path_3mf (str): Destination path, e.g. 'output/panel_3D.3mf'.
+        color_changes_z (list[float]): Ascending list of Z heights (mm) at which
+            a color-change pause should be inserted, e.g. [1.0, 1.6, 2.2].
+    """
+    # --- 1. Dump the mesh to an in-memory binary STL buffer (no temp file) ---
+    stl_buffer = io.BytesIO()
+    mesh.export(stl_buffer, file_type='stl')
+    stl_bytes = stl_buffer.getvalue()
+
+    # --- 2. Build the Bambu color-change metadata XML ---
+    config = ET.Element("config")
+    plate = ET.SubElement(config, "plate")
+    ET.SubElement(plate, "metadata", name="schema_version", value="2")
+
+    # One <color_change> node per halftone level transition
+    for z_height in sorted(color_changes_z):
+        cc = ET.SubElement(plate, "color_change")
+        cc.set("z", str(round(z_height, 3)))
+        cc.set("extruder", "1")  # Single-extruder: always extruder 1
+
+    settings_xml_bytes = ET.tostring(
+        config, encoding='unicode', xml_declaration=False
+    ).encode('utf-8')
+
+    # --- 3. Pack everything into the .3mf ZIP archive ---
+    with zipfile.ZipFile(output_path_3mf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", _3MF_CONTENT_TYPES)
+        zf.writestr("_rels/.rels", _3MF_RELS)
+        zf.writestr("3D/model.stl", stl_bytes)
+        zf.writestr("Metadata/Bambu_model_settings.xml", settings_xml_bytes)
+
+
+# ---------------------------------------------------------------------------
+# BACKGROUND MESH WORKER
+# ---------------------------------------------------------------------------
 class MeshWorker(QThread):
     progress = pyqtSignal(int, str)
-    finished_ok = pyqtSignal(str)
+    finished_ok = pyqtSignal(str, str)   # (stl_path, path_3mf)
     finished_err = pyqtSignal(str)
 
-    def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h, output_path, max_res):
+    def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
+                 output_path, output_path_3mf, color_changes_z, max_res):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -119,6 +186,8 @@ class MeshWorker(QThread):
         self.max_h = max_h
         self.base_h = base_h
         self.output_path = output_path
+        self.output_path_3mf = output_path_3mf
+        self.color_changes_z = color_changes_z
         self.max_res = max_res
 
     def run(self):
@@ -205,11 +274,14 @@ class MeshWorker(QThread):
             mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
             trimesh.repair.fix_normals(mesh) # Necessario per renderlo watertight
             
-            self.progress.emit(98, "Exporting physical STL File...")
+            self.progress.emit(96, "Exporting STL file...")
             mesh.export(self.output_path)
-            
-            self.progress.emit(100, "Model successfully saved!")
-            self.finished_ok.emit(self.output_path)
+
+            self.progress.emit(98, "Packaging .3MF for Bambu Studio...")
+            export_3mf(mesh, self.output_path_3mf, self.color_changes_z)
+
+            self.progress.emit(100, "STL + 3MF exported successfully!")
+            self.finished_ok.emit(self.output_path, self.output_path_3mf)
             
         except Exception as e:
             self.finished_err.emit(str(e))
@@ -500,37 +572,54 @@ class Manga3DApp(QMainWindow):
     def generate_stl(self):
         if self.img_filtered_array is None or getattr(self, 'loaded_image_path', None) is None:
             return
-            
-        # Calcolo destinazione automatica senza chiedere all'utente
+
+        # --- Auto-compute output paths (no user prompt) ---
         base_dir = os.path.dirname(self.loaded_image_path)
         output_dir = os.path.join(base_dir, "output")
         os.makedirs(output_dir, exist_ok=True)
-        
+
         base_name = os.path.splitext(os.path.basename(self.loaded_image_path))[0]
-        save_path = os.path.join(output_dir, f"{base_name}_3D.stl")
-        
-        # Se esiste già, applica un numero progressivo
+        save_path_stl = os.path.join(output_dir, f"{base_name}_3D.stl")
+        save_path_3mf = os.path.join(output_dir, f"{base_name}_3D.3mf")
+
+        # Anti-overwrite: append progressive counter to BOTH files simultaneously
         counter = 1
-        while os.path.exists(save_path):
-            save_path = os.path.join(output_dir, f"{base_name}_3D_{counter}.stl")
+        while os.path.exists(save_path_stl) or os.path.exists(save_path_3mf):
+            save_path_stl = os.path.join(output_dir, f"{base_name}_3D_{counter}.stl")
+            save_path_3mf = os.path.join(output_dir, f"{base_name}_3D_{counter}.3mf")
             counter += 1
-            
-        # UI Locking
+
+        # --- Compute color-change Z heights from the sampled threshold values ---
+        # Sort the 4 sampled grey values descending (brightest first)
+        s0, s1, s2, s3 = sorted(self.sampled_colors, reverse=True)
+        base_h  = self.spin_base.value()
+        max_h   = self.spin_maxh.value()
+        relief  = max_h - base_h
+        # The 3 terrain steps in normalised space are 0.33 / 0.66 / 1.0
+        # → map back to absolute Z heights
+        color_changes_z = [
+            round(base_h + 0.33 * relief, 3),   # L1 Light Gray level
+            round(base_h + 0.66 * relief, 3),   # L2 Dark Gray level
+            round(base_h + 1.00 * relief, 3),   # L3 Black/Inks peak
+        ]
+
+        # --- Lock UI ---
         self.btn_load.setEnabled(False)
         self.btn_generate.setEnabled(False)
         self.progress_bar.setValue(0)
-        
         for btn in self.swatches:
             btn.setEnabled(False)
-            
-        # Avvia QThread
+
+        # --- Launch background QThread ---
         self.worker = MeshWorker(
             img_filtered=self.img_filtered_array,
             sampled_values=self.sampled_colors,
             max_dim=self.spin_dim.value(),
-            max_h=self.spin_maxh.value(),
-            base_h=self.spin_base.value(),
-            output_path=save_path,
+            max_h=max_h,
+            base_h=base_h,
+            output_path=save_path_stl,
+            output_path_3mf=save_path_3mf,
+            color_changes_z=color_changes_z,
             max_res=self.spin_res.value()
         )
         self.worker.progress.connect(self.on_progress)
@@ -548,11 +637,18 @@ class Manga3DApp(QMainWindow):
         for btn in self.swatches:
             btn.setEnabled(True)
 
-    def on_generate_done(self, output_path):
+    def on_generate_done(self, stl_path, path_3mf):
         self.unlock_ui()
         self.progress_bar.setValue(100)
-        self.lbl_status.setText("🏁 Rendering Completed 100%")
-        QMessageBox.information(self, "Success", f"Trimesh has successfully reconstructed and exported the file to:\n{output_path}")
+        self.lbl_status.setText("🏁 STL + 3MF Export Completed!")
+        QMessageBox.information(
+            self, "Export Successful",
+            f"Both files have been saved to:\n"
+            f"📄 STL → {stl_path}\n"
+            f"🎨 3MF → {path_3mf}\n\n"
+            f"The .3mf file includes automatic color-change pauses\n"
+            f"for halftone levels — ready to slice in Bambu Studio!"
+        )
 
     def on_generate_error(self, err_msg):
         self.unlock_ui()
