@@ -531,6 +531,10 @@ class Manga3DApp(QMainWindow):
         # Initialise the spinboxes to default computed values and set read-only
         self._refresh_auto_z_display()
         self._on_auto_z_toggled(True)
+
+        # Live-refresh Z display whenever physical parameters change
+        self.spin_base.valueChanged.connect(self._on_physical_param_changed)
+        self.spin_maxh.valueChanged.connect(self._on_physical_param_changed)
         
         right_layout.addStretch()
 
@@ -570,6 +574,11 @@ class Manga3DApp(QMainWindow):
         self.spin_z1.setValue(z1)
         self.spin_z2.setValue(z2)
         self.spin_z3.setValue(z3)
+
+    def _on_physical_param_changed(self):
+        """Called whenever Base or MaxZ spinboxes change — refresh Z display if auto mode is on."""
+        if self.chk_auto_z.isChecked():
+            self._refresh_auto_z_display()
 
     def _on_auto_z_toggled(self, checked):
         """Enable/disable the manual Z spinboxes depending on the checkbox state."""
@@ -752,13 +761,25 @@ class Manga3DApp(QMainWindow):
         self.unlock_ui()
         self.progress_bar.setValue(100)
         self.lbl_status.setText("🏁 STL + 3MF Export Completed!")
+
+        # Retrieve the Z values that were actually used
+        z1 = self.spin_z1.value()
+        z2 = self.spin_z2.value()
+        z3 = self.spin_z3.value()
+
         QMessageBox.information(
             self, "Export Successful",
-            f"Both files have been saved to:\n"
+            f"Files saved:\n"
             f"📄 STL → {stl_path}\n"
             f"🎨 3MF → {path_3mf}\n\n"
-            f"The .3mf file includes automatic color-change pauses\n"
-            f"for halftone levels — ready to slice in Bambu Studio!"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎨  BAMBU STUDIO — Color Changes\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"After slicing, add these layer pauses\n"
+            f"via the colored bar on the right side:\n\n"
+            f"  • L1 Light Gray  →  Z = {z1} mm  (Filament 2)\n"
+            f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 3)\n"
+            f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 4)\n"
         )
 
     def on_generate_error(self, err_msg):
