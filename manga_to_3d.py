@@ -232,7 +232,7 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, max_res):
+                 output_path, output_path_3mf, color_changes_z, max_res, layer_height, flat_layers):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -243,6 +243,8 @@ class MeshWorker(QThread):
         self.output_path_3mf = output_path_3mf
         self.color_changes_z = color_changes_z
         self.max_res = max_res
+        self.layer_height = layer_height
+        self.flat_layers = flat_layers
 
     def run(self):
         try:
@@ -265,14 +267,17 @@ class MeshWorker(QThread):
             th_2 = (s1 + s2) / 2.0
             th_3 = (s2 + s3) / 2.0
             
-            self.progress.emit(25, "Calculating asymmetric terraced extrusion...")
-            norm_img = np.zeros_like(img_filtered, dtype=float)
-            norm_img[img_filtered < th_1] = 0.33
-            norm_img[img_filtered < th_2] = 0.66
-            norm_img[img_filtered < th_3] = 1.0
-            
-            relief_height = self.max_h - self.base_h
-            Z = self.base_h + (norm_img * relief_height)
+            if self.flat_layers:
+                self.progress.emit(25, "Calculating flat layers extrusion (Posterization)...")
+                Z = np.full_like(img_filtered, self.base_h, dtype=float)
+                Z[img_filtered < th_1] = self.color_changes_z[0]
+                Z[img_filtered < th_2] = self.color_changes_z[1]
+                Z[img_filtered < th_3] = self.color_changes_z[2]
+            else:
+                self.progress.emit(25, "Calculating continuous relief extrusion...")
+                relief_height = self.max_h - self.base_h
+                # Map 0-255 linearly to Z: 0 (black) is max_h, 255 (white) is base_h
+                Z = self.base_h + ((255.0 - img_filtered) / 255.0) * relief_height
             
             self.progress.emit(40, "Generating mathematical X and Y points (MeshGrid)...")
             h, w = img_filtered.shape
@@ -500,6 +505,12 @@ class Manga3DApp(QMainWindow):
         self.spin_maxh.setSingleStep(0.1)
         form_layout.addRow("Max Z (mm):", self.spin_maxh)
 
+        self.spin_layer_height = QDoubleSpinBox()
+        self.spin_layer_height.setRange(0.01, 1.0)
+        self.spin_layer_height.setValue(0.20)
+        self.spin_layer_height.setSingleStep(0.01)
+        form_layout.addRow("Printing Layer Height (mm):", self.spin_layer_height)
+
         self.spin_res = QSpinBox()
         self.spin_res.setRange(200, 4000)
         self.spin_res.setValue(800)
@@ -518,6 +529,10 @@ class Manga3DApp(QMainWindow):
         self.chk_auto_z.toggled.connect(self._on_auto_z_toggled)
         z_layout.addRow(self.chk_auto_z)
 
+        self.chk_flat_layers = QCheckBox("Flat Layers Mode (Posterize)")
+        self.chk_flat_layers.setChecked(True)
+        z_layout.addRow(self.chk_flat_layers)
+
         self.spin_z1 = QDoubleSpinBox(); self.spin_z1.setRange(0.1, 50.0); self.spin_z1.setSingleStep(0.1)
         self.spin_z2 = QDoubleSpinBox(); self.spin_z2.setRange(0.1, 50.0); self.spin_z2.setSingleStep(0.1)
         self.spin_z3 = QDoubleSpinBox(); self.spin_z3.setRange(0.1, 50.0); self.spin_z3.setSingleStep(0.1)
@@ -535,6 +550,7 @@ class Manga3DApp(QMainWindow):
         # Live-refresh Z display whenever physical parameters change
         self.spin_base.valueChanged.connect(self._on_physical_param_changed)
         self.spin_maxh.valueChanged.connect(self._on_physical_param_changed)
+        self.spin_layer_height.valueChanged.connect(self._on_physical_param_changed)
         
         right_layout.addStretch()
 
@@ -558,15 +574,23 @@ class Manga3DApp(QMainWindow):
         splitter.setSizes([850, 350])
 
     def _compute_auto_z(self):
-        """Return the 3 auto-computed color-change Z heights based on current spinbox values."""
+        """Return the 3 auto-computed color-change Z heights based on current spinbox values, snapped to layer height."""
         base_h = self.spin_base.value()
         max_h  = self.spin_maxh.value()
+        layer_h = self.spin_layer_height.value()
         relief = max_h - base_h
-        return [
-            round(base_h + 0.33 * relief, 3),
-            round(base_h + 0.66 * relief, 3),
-            round(base_h + 1.00 * relief, 3),
-        ]
+        
+        # Calculate theoretical heights
+        z1_theo = base_h + 0.33 * relief
+        z2_theo = base_h + 0.66 * relief
+        z3_theo = base_h + 1.00 * relief
+        
+        # Snap to nearest multiple of layer height
+        z1 = round(z1_theo / layer_h) * layer_h
+        z2 = round(z2_theo / layer_h) * layer_h
+        z3 = round(z3_theo / layer_h) * layer_h
+        
+        return [round(z1, 3), round(z2, 3), round(z3, 3)]
 
     def _refresh_auto_z_display(self):
         """Update the Z spinboxes with the currently computed auto values (read-only display)."""
@@ -740,7 +764,9 @@ class Manga3DApp(QMainWindow):
             output_path=save_path_stl,
             output_path_3mf=save_path_3mf,
             color_changes_z=color_changes_z,
-            max_res=self.spin_res.value()
+            max_res=self.spin_res.value(),
+            layer_height=self.spin_layer_height.value(),
+            flat_layers=self.chk_flat_layers.isChecked()
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
