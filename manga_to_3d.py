@@ -9,6 +9,7 @@ import numpy as np
 import trimesh
 from PIL import Image
 import gc
+import fast_simplification
 import pillow_heif
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
@@ -331,12 +332,24 @@ class MeshWorker(QThread):
             if self.smart_decimate and len(mesh.faces) > 1_500_000:
                 target_faces = 900_000
                 self.progress.emit(92, f"Optimizing mesh geometry (Decimating {len(mesh.faces):,} → {target_faces:,} faces)...")
-                mesh = mesh.simplify_quadric_decimation(target_faces)
+                verts_out, faces_out = fast_simplification.simplify(
+                    mesh.vertices.astype(np.float64),
+                    mesh.faces.astype(np.int64),
+                    target_count=target_faces,
+                    agg=5.0
+                )
+                mesh = trimesh.Trimesh(vertices=verts_out, faces=faces_out, process=False)
                 trimesh.repair.fix_normals(mesh)
             elif self.smart_decimate and len(mesh.faces) > 500_000:
                 target_faces = int(len(mesh.faces) * 0.6)
                 self.progress.emit(92, f"Optimizing mesh geometry (Decimating {len(mesh.faces):,} → {target_faces:,} faces)...")
-                mesh = mesh.simplify_quadric_decimation(target_faces)
+                verts_out, faces_out = fast_simplification.simplify(
+                    mesh.vertices.astype(np.float64),
+                    mesh.faces.astype(np.int64),
+                    target_count=target_faces,
+                    agg=5.0
+                )
+                mesh = trimesh.Trimesh(vertices=verts_out, faces=faces_out, process=False)
                 trimesh.repair.fix_normals(mesh)
             
             self.progress.emit(96, "Esportazione STL...")
