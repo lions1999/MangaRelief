@@ -180,11 +180,17 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
     src_buf.seek(0)
 
     # 2. Build custom_gcode_per_layer.xml layer nodes
+    # Each change must point to a DIFFERENT extruder slot (2, 3, 4...).
+    # Slot 1 is the starting filament (white base); slots 2+ are the relief colors.
+    # Color hex values are descriptive labels Bambu shows in the UI per slot.
+    slot_colors = ["#C8C8C8", "#646464", "#000000", "#1a1a1a"]  # Light→Dark per slot
     layer_nodes = ""
-    for z in sorted(color_changes_z):
+    for i, z in enumerate(sorted(color_changes_z)):
+        extruder = i + 2          # slot 2, 3, 4 — never 1 (that is the starting slot)
+        color    = slot_colors[i] if i < len(slot_colors) else "#000000"
         layer_nodes += (
-            f'<layer top_z="{round(z, 4)}" type="2" extruder="1" '
-            f'color="#000000" extra="" gcode="tool_change"/>\n'
+            f'<layer top_z="{round(z, 4)}" type="2" extruder="{extruder}" '
+            f'color="{color}" extra="" gcode="tool_change"/>\n'
         )
     custom_gcode = _CUSTOM_GCODE_TPL.format(layer_nodes=layer_nodes)
 
