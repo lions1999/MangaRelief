@@ -110,100 +110,188 @@ QLabel {
 """
 
 # ---------------------------------------------------------------------------
-# .3MF EXPORT  —  OPC-compliant, Bambu Studio native project
+# .3MF EXPORT  —  Faithful Bambu Studio native project clone
 # ---------------------------------------------------------------------------
-# Bambu Studio recognises a project as "native" when:
-#   1. [Content_Types].xml contains an <Override> for each Metadata file.
-#   2. Metadata/model_settings.xml is present with the correct project tag.
-#   3. Metadata/Bambu_model_settings.xml carries the <color_change> entries.
-# We rebuild the entire ZIP from scratch so we can patch [Content_Types].xml
-# in-flight rather than relying on a fragile append strategy.
+# Schema discovered by reverse-engineering a real Bambu Studio .3mf project:
+#
+# Archive structure:
+#   [Content_Types].xml                  — MIME map (Default entries only, no Overrides)
+#   _rels/.rels                          — points to 3D/3dmodel.model + thumbnail
+#   3D/3dmodel.model                     — top-level model XML (references object file)
+#   3D/_rels/3dmodel.model.rels          — points to 3D/Objects/object_1.model
+#   3D/Objects/object_1.model            — actual geometry (vertices + triangles)
+#   Metadata/model_settings.config       — object metadata + plate layout
+#   Metadata/custom_gcode_per_layer.xml  — ★ color-change entries live here
+#   Metadata/slice_info.config           — Bambu client version header
+#
+# Color changes use:
+#   <layer top_z="Z_MM" type="2" extruder="1" color="#000000"
+#          extra="" gcode="tool_change"/>
+# ---------------------------------------------------------------------------
 
-_BAMBU_MODEL_SETTINGS_TPL = """<?xml version="1.0" encoding="UTF-8"?>
+_CT_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+ <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+ <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+ <Default Extension="config" ContentType="application/xml"/>
+ <Default Extension="xml" ContentType="application/xml"/>
+</Types>"""
+
+_RELS_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+</Relationships>"""
+
+_3DMODEL_MODEL = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US"
+  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+  xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">
+ <metadata name="BambuStudio:3mfVersion" value="1"/>
+ <resources/>
+ <build/>
+</model>"""
+
+_3DMODEL_RELS = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Target="/3D/Objects/object_1.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+</Relationships>"""
+
+_SLICE_INFO = """\
+<?xml version="1.0" encoding="UTF-8"?>
 <config>
+  <header>
+    <header_item key="X-BBL-Client-Type" value="slicer"/>
+    <header_item key="X-BBL-Client-Version" value="02.06.00.51"/>
+  </header>
+</config>"""
+
+_MODEL_SETTINGS_TPL = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="2">
+    <metadata key="name" value="{stl_name}"/>
+    <metadata key="extruder" value="1"/>
+    <part id="1" subtype="normal_part">
+      <metadata key="name" value="{stl_name}"/>
+      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>
+      <metadata key="source_file" value="{stl_name}"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="0"/>
+      <metadata key="source_offset_x" value="0"/>
+      <metadata key="source_offset_y" value="0"/>
+      <metadata key="source_offset_z" value="{half_z}"/>
+    </part>
+  </object>
   <plate>
-    <metadata name="schema_version" value="2"/>
-    <metadata name="is_seq_print" value="0"/>
-    <metadata name="nozzle_diameter" value="0.4"/>
-{color_change_nodes}
+    <metadata key="plater_id" value="1"/>
+    <metadata key="plater_name" value=""/>
+    <metadata key="locked" value="false"/>
+    <metadata key="thumbnail_file" value=""/>
+    <model_instance>
+      <metadata key="object_id" value="2"/>
+      <metadata key="instance_id" value="0"/>
+      <metadata key="identify_id" value="1"/>
+    </model_instance>
   </plate>
-</config>
-"""
+  <assemble>
+   <assemble_item object_id="2" instance_id="0"
+     transform="1 0 0 0 1 0 0 0 1 0 0 0" offset="0 0 0"/>
+  </assemble>
+</config>"""
 
-_BAMBU_PROJECT_SETTINGS = """<?xml version="1.0" encoding="UTF-8"?>
-<config>
-  <metadata name="schema_version" value="2"/>
-  <metadata name="Bambu_version" value="01.08.04.54"/>
-</config>
-"""
+_CUSTOM_GCODE_TPL = """\
+<?xml version="1.0" encoding="utf-8"?>
+<custom_gcodes_per_layer>
+<plate>
+<plate_info id="1"/>
+{layer_nodes}<mode value="MultiAsSingle"/>
+</plate>
+</custom_gcodes_per_layer>"""
 
-_CONTENT_TYPE_OVERRIDE = (
-    '<Override PartName="/Metadata/Bambu_model_settings.xml"'
-    ' ContentType="application/xml"/>'
-)
-_CONTENT_TYPE_OVERRIDE_PROJ = (
-    '<Override PartName="/Metadata/model_settings.xml"'
-    ' ContentType="application/xml"/>'
-)
+
+def _mesh_to_3mf_object_model(mesh):
+    """
+    Serialises a Trimesh mesh to the 3MF object model XML format
+    (3D/Objects/object_1.model) using the 3MF Core Specification.
+    This avoids any dependency on trimesh's own 3mf writer path.
+    """
+    verts = mesh.vertices
+    faces = mesh.faces
+
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<model unit="millimeter" xml:lang="en-US"',
+        '  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">',
+        ' <resources>',
+        '  <object id="1" type="model">',
+        '   <mesh>',
+        '    <vertices>',
+    ]
+    for v in verts:
+        lines.append(f'     <vertex x="{v[0]:.6f}" y="{v[1]:.6f}" z="{v[2]:.6f}"/>')
+    lines.append('    </vertices>')
+    lines.append('    <triangles>')
+    for f in faces:
+        lines.append(f'     <triangle v1="{f[0]}" v2="{f[1]}" v3="{f[2]}"/>')
+    lines.append('    </triangles>')
+    lines += [
+        '   </mesh>',
+        '  </object>',
+        ' </resources>',
+        ' <build>',
+        '  <item objectid="1"/>',
+        ' </build>',
+        '</model>',
+    ]
+    return '\n'.join(lines).encode('utf-8')
 
 
 def export_3mf(mesh, output_path_3mf, color_changes_z):
     """
-    Exports a Trimesh mesh as a Bambu-Studio-native .3mf file.
+    Exports a Trimesh mesh as a Bambu-Studio-native .3mf project file.
 
-    Strategy:
-      1. Trimesh generates a spec-compliant .3mf in memory (correct geometry XML).
-      2. We iterate over every entry in the original ZIP and copy it verbatim,
-         EXCEPT [Content_Types].xml which we patch on-the-fly to add the two
-         Bambu <Override> entries required for native project recognition.
-      3. We append the two Bambu metadata files.
-      4. The resulting archive is written to disk.
+    The archive faithfully replicates the structure of a real Bambu Studio
+    project, placing color-change gcode instructions in the correct file
+    (Metadata/custom_gcode_per_layer.xml) so that Bambu Studio loads them
+    without any warning and displays the color-change pauses automatically.
 
     Args:
         mesh (trimesh.Trimesh): Fully-built watertight mesh.
         output_path_3mf (str): Destination path, e.g. 'output/panel_3D.3mf'.
-        color_changes_z (list[float]): Z heights (mm) for M600 color-change pauses.
+        color_changes_z (list[float]): Z heights (mm) for color-change pauses.
     """
-    # 1. Trimesh → valid .3mf geometry in memory
-    src_buf = io.BytesIO()
-    mesh.export(src_buf, file_type='3mf')
-    src_buf.seek(0)
+    stl_name   = os.path.basename(output_path_3mf).replace('.3mf', '.stl')
+    max_z      = max(mesh.bounds[1][2], 0.001)   # actual mesh top Z
+    half_z     = round(max_z / 2.0, 6)
 
-    # 2. Build Bambu color-change XML
-    cc_nodes = ""
+    # Build <layer> nodes for custom_gcode_per_layer.xml
+    layer_nodes = ""
     for z in sorted(color_changes_z):
-        cc_nodes += f'    <color_change z="{round(z, 3)}" extruder="1"/>\n'
+        layer_nodes += (
+            f'<layer top_z="{round(z, 4)}" type="2" extruder="1" '
+            f'color="#000000" extra="" gcode="tool_change"/>\n'
+        )
 
-    bambu_settings_xml  = _BAMBU_MODEL_SETTINGS_TPL.format(color_change_nodes=cc_nodes)
-    project_settings_xml = _BAMBU_PROJECT_SETTINGS
+    model_settings  = _MODEL_SETTINGS_TPL.format(stl_name=stl_name, half_z=half_z)
+    custom_gcode    = _CUSTOM_GCODE_TPL.format(layer_nodes=layer_nodes)
+    object_model    = _mesh_to_3mf_object_model(mesh)
 
-    # 3. Rebuild ZIP, patching [Content_Types].xml
+    # Assemble the ZIP archive
     dst_buf = io.BytesIO()
-    with zipfile.ZipFile(src_buf, 'r') as src_zip, \
-         zipfile.ZipFile(dst_buf, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
+    with zipfile.ZipFile(dst_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('[Content_Types].xml',                  _CT_XML)
+        zf.writestr('_rels/.rels',                          _RELS_XML)
+        zf.writestr('3D/3dmodel.model',                     _3DMODEL_MODEL)
+        zf.writestr('3D/_rels/3dmodel.model.rels',          _3DMODEL_RELS)
+        zf.writestr('3D/Objects/object_1.model',            object_model)
+        zf.writestr('Metadata/model_settings.config',       model_settings.encode('utf-8'))
+        zf.writestr('Metadata/custom_gcode_per_layer.xml',  custom_gcode.encode('utf-8'))
+        zf.writestr('Metadata/slice_info.config',           _SLICE_INFO)
 
-        for item in src_zip.infolist():
-            data = src_zip.read(item.filename)
-
-            if item.filename == '[Content_Types].xml':
-                # Patch: inject the two Bambu Override tags before </Types>
-                ct_text = data.decode('utf-8')
-                ct_text = ct_text.replace(
-                    '</Types>',
-                    f'  {_CONTENT_TYPE_OVERRIDE}\n'
-                    f'  {_CONTENT_TYPE_OVERRIDE_PROJ}\n</Types>'
-                )
-                data = ct_text.encode('utf-8')
-
-            dst_zip.writestr(item, data)
-
-        # Inject Bambu metadata files
-        dst_zip.writestr('Metadata/Bambu_model_settings.xml',
-                         bambu_settings_xml.encode('utf-8'))
-        dst_zip.writestr('Metadata/model_settings.xml',
-                         project_settings_xml.encode('utf-8'))
-
-    # 4. Write to disk
     dst_buf.seek(0)
     with open(output_path_3mf, 'wb') as f:
         f.write(dst_buf.read())
