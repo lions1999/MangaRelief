@@ -9,11 +9,11 @@ import trimesh
 from PIL import Image
 import pillow_heif
 
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QFileDialog, 
-                             QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, 
-                             QSplitter, QProgressBar, QDoubleSpinBox, QSpinBox, QMessageBox, 
-                             QGroupBox, QFormLayout)
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QPushButton, QLabel, QFileDialog,
+                             QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
+                             QSplitter, QProgressBar, QDoubleSpinBox, QSpinBox,
+                             QMessageBox, QGroupBox, QFormLayout, QCheckBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QIcon
 import ctypes
@@ -110,56 +110,103 @@ QLabel {
 """
 
 # ---------------------------------------------------------------------------
-# .3MF EXPORT — Bambu Studio compatible (geometry via Trimesh, metadata injected)
+# .3MF EXPORT  —  OPC-compliant, Bambu Studio native project
 # ---------------------------------------------------------------------------
+# Bambu Studio recognises a project as "native" when:
+#   1. [Content_Types].xml contains an <Override> for each Metadata file.
+#   2. Metadata/model_settings.xml is present with the correct project tag.
+#   3. Metadata/Bambu_model_settings.xml carries the <color_change> entries.
+# We rebuild the entire ZIP from scratch so we can patch [Content_Types].xml
+# in-flight rather than relying on a fragile append strategy.
+
+_BAMBU_MODEL_SETTINGS_TPL = """<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <plate>
+    <metadata name="schema_version" value="2"/>
+    <metadata name="is_seq_print" value="0"/>
+    <metadata name="nozzle_diameter" value="0.4"/>
+{color_change_nodes}
+  </plate>
+</config>
+"""
+
+_BAMBU_PROJECT_SETTINGS = """<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <metadata name="schema_version" value="2"/>
+  <metadata name="Bambu_version" value="01.08.04.54"/>
+</config>
+"""
+
+_CONTENT_TYPE_OVERRIDE = (
+    '<Override PartName="/Metadata/Bambu_model_settings.xml"'
+    ' ContentType="application/xml"/>'
+)
+_CONTENT_TYPE_OVERRIDE_PROJ = (
+    '<Override PartName="/Metadata/model_settings.xml"'
+    ' ContentType="application/xml"/>'
+)
+
 
 def export_3mf(mesh, output_path_3mf, color_changes_z):
     """
-    Exports a Trimesh mesh as a valid .3mf file compatible with Bambu Studio.
+    Exports a Trimesh mesh as a Bambu-Studio-native .3mf file.
 
     Strategy:
-      1. Let Trimesh generate a spec-compliant .3mf (with proper XML geometry)
-         into an in-memory buffer.
-      2. Open that buffer as a ZIP archive in APPEND mode.
-      3. Inject the Bambu color-change metadata XML as an extra entry.
-      4. Write the final bytes to disk.
+      1. Trimesh generates a spec-compliant .3mf in memory (correct geometry XML).
+      2. We iterate over every entry in the original ZIP and copy it verbatim,
+         EXCEPT [Content_Types].xml which we patch on-the-fly to add the two
+         Bambu <Override> entries required for native project recognition.
+      3. We append the two Bambu metadata files.
+      4. The resulting archive is written to disk.
 
     Args:
-        mesh (trimesh.Trimesh): The fully-built, watertight mesh object.
+        mesh (trimesh.Trimesh): Fully-built watertight mesh.
         output_path_3mf (str): Destination path, e.g. 'output/panel_3D.3mf'.
-        color_changes_z (list[float]): Ascending list of Z heights (mm) at which
-            a color-change pause (M600) should be inserted, e.g. [1.0, 1.6, 2.5].
+        color_changes_z (list[float]): Z heights (mm) for M600 color-change pauses.
     """
-    # --- 1. Let Trimesh generate a geometrically valid .3mf in memory ---
-    # This produces the correct 3D/3dmodel.model XML that Bambu Studio requires.
-    tmf_buffer = io.BytesIO()
-    mesh.export(tmf_buffer, file_type='3mf')
-    tmf_buffer.seek(0)  # Rewind so zipfile can read from the beginning
+    # 1. Trimesh → valid .3mf geometry in memory
+    src_buf = io.BytesIO()
+    mesh.export(src_buf, file_type='3mf')
+    src_buf.seek(0)
 
-    # --- 2. Build the Bambu color-change metadata XML ---
-    # One <color_change> node per halftone terrain level (e.g. 3 nodes for 3 levels)
-    config = ET.Element("config")
-    plate = ET.SubElement(config, "plate")
-    ET.SubElement(plate, "metadata", name="schema_version", value="2")
+    # 2. Build Bambu color-change XML
+    cc_nodes = ""
+    for z in sorted(color_changes_z):
+        cc_nodes += f'    <color_change z="{round(z, 3)}" extruder="1"/>\n'
 
-    for z_height in sorted(color_changes_z):
-        cc = ET.SubElement(plate, "color_change")
-        cc.set("z", str(round(z_height, 3)))
-        cc.set("extruder", "1")  # Single-extruder workflow: always extruder 1
+    bambu_settings_xml  = _BAMBU_MODEL_SETTINGS_TPL.format(color_change_nodes=cc_nodes)
+    project_settings_xml = _BAMBU_PROJECT_SETTINGS
 
-    settings_xml_bytes = ET.tostring(
-        config, encoding='unicode', xml_declaration=False
-    ).encode('utf-8')
+    # 3. Rebuild ZIP, patching [Content_Types].xml
+    dst_buf = io.BytesIO()
+    with zipfile.ZipFile(src_buf, 'r') as src_zip, \
+         zipfile.ZipFile(dst_buf, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
 
-    # --- 3. Open the Trimesh-generated archive in APPEND mode and inject metadata ---
-    # 'a' mode adds files without touching existing entries.
-    with zipfile.ZipFile(tmf_buffer, 'a', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("Metadata/Bambu_model_settings.xml", settings_xml_bytes)
+        for item in src_zip.infolist():
+            data = src_zip.read(item.filename)
 
-    # --- 4. Write the enriched archive buffer to disk ---
-    tmf_buffer.seek(0)
+            if item.filename == '[Content_Types].xml':
+                # Patch: inject the two Bambu Override tags before </Types>
+                ct_text = data.decode('utf-8')
+                ct_text = ct_text.replace(
+                    '</Types>',
+                    f'  {_CONTENT_TYPE_OVERRIDE}\n'
+                    f'  {_CONTENT_TYPE_OVERRIDE_PROJ}\n</Types>'
+                )
+                data = ct_text.encode('utf-8')
+
+            dst_zip.writestr(item, data)
+
+        # Inject Bambu metadata files
+        dst_zip.writestr('Metadata/Bambu_model_settings.xml',
+                         bambu_settings_xml.encode('utf-8'))
+        dst_zip.writestr('Metadata/model_settings.xml',
+                         project_settings_xml.encode('utf-8'))
+
+    # 4. Write to disk
+    dst_buf.seek(0)
     with open(output_path_3mf, 'wb') as f:
-        f.write(tmf_buffer.read())
+        f.write(dst_buf.read())
 
 
 # ---------------------------------------------------------------------------
@@ -354,13 +401,13 @@ class Manga3DApp(QMainWindow):
         self.setWindowTitle("MangaRelief Pro")
         self.setWindowIcon(QIcon(resource_path('icon.ico')))
         self.resize(1200, 800)
-        
+
         self.img_filtered_array = None
         self.active_swatch_index = None
         self.loaded_image_path = None
-        # Valori di default di ripiego
-        self.sampled_colors = [250, 210, 150, 15] 
-        
+        self.last_opened_dir = ""          # UX: remember last browsed folder
+        self.sampled_colors = [250, 210, 150, 15]
+
         self.initUI()
         self.update_swatch_colors()
         
@@ -421,37 +468,60 @@ class Manga3DApp(QMainWindow):
         # PARAMS PANEL
         group_params = QGroupBox("Physical Parameters")
         form_layout = QFormLayout()
-        
+
         self.spin_dim = QDoubleSpinBox()
         self.spin_dim.setRange(50.0, 600.0)
         self.spin_dim.setValue(200.0)
         form_layout.addRow("Max Dim (mm):", self.spin_dim)
-        
+
         self.spin_base = QDoubleSpinBox()
         self.spin_base.setRange(0.5, 10.0)
         self.spin_base.setValue(1.0)
         self.spin_base.setSingleStep(0.1)
         form_layout.addRow("Base (mm):", self.spin_base)
-        
+
         self.spin_maxh = QDoubleSpinBox()
         self.spin_maxh.setRange(1.0, 20.0)
         self.spin_maxh.setValue(2.5)
         self.spin_maxh.setSingleStep(0.1)
         form_layout.addRow("Max Z (mm):", self.spin_maxh)
-        
+
         self.spin_res = QSpinBox()
         self.spin_res.setRange(200, 4000)
         self.spin_res.setValue(800)
         self.spin_res.setSingleStep(100)
         form_layout.addRow("Mesh Res. (px):", self.spin_res)
-        
+
         group_params.setLayout(form_layout)
         right_layout.addWidget(group_params)
+
+        # HALFTONE Z PANEL
+        group_z = QGroupBox("Halftone Color-Change Z (mm)")
+        z_layout = QFormLayout()
+
+        self.chk_auto_z = QCheckBox("Auto-Calculate Halftone Z")
+        self.chk_auto_z.setChecked(True)
+        self.chk_auto_z.toggled.connect(self._on_auto_z_toggled)
+        z_layout.addRow(self.chk_auto_z)
+
+        self.spin_z1 = QDoubleSpinBox(); self.spin_z1.setRange(0.1, 50.0); self.spin_z1.setSingleStep(0.1)
+        self.spin_z2 = QDoubleSpinBox(); self.spin_z2.setRange(0.1, 50.0); self.spin_z2.setSingleStep(0.1)
+        self.spin_z3 = QDoubleSpinBox(); self.spin_z3.setRange(0.1, 50.0); self.spin_z3.setSingleStep(0.1)
+        z_layout.addRow("L1 Z (Light Gray):", self.spin_z1)
+        z_layout.addRow("L2 Z (Dark Gray):",  self.spin_z2)
+        z_layout.addRow("L3 Z (Black/Inks):", self.spin_z3)
+
+        group_z.setLayout(z_layout)
+        right_layout.addWidget(group_z)
+
+        # Initialise the spinboxes to default computed values and set read-only
+        self._refresh_auto_z_display()
+        self._on_auto_z_toggled(True)
         
         right_layout.addStretch()
-        
+
         # BOTTOM CONTROLS
-        self.btn_generate = QPushButton("🚀 Generate STL")
+        self.btn_generate = QPushButton("🚀 Generate STL + 3MF")
         self.btn_generate.setFixedHeight(50)
         self.btn_generate.setEnabled(False)
         self.btn_generate.clicked.connect(self.generate_stl)
@@ -469,14 +539,43 @@ class Manga3DApp(QMainWindow):
         splitter.addWidget(right_panel)
         splitter.setSizes([850, 350])
 
+    def _compute_auto_z(self):
+        """Return the 3 auto-computed color-change Z heights based on current spinbox values."""
+        base_h = self.spin_base.value()
+        max_h  = self.spin_maxh.value()
+        relief = max_h - base_h
+        return [
+            round(base_h + 0.33 * relief, 3),
+            round(base_h + 0.66 * relief, 3),
+            round(base_h + 1.00 * relief, 3),
+        ]
+
+    def _refresh_auto_z_display(self):
+        """Update the Z spinboxes with the currently computed auto values (read-only display)."""
+        z1, z2, z3 = self._compute_auto_z()
+        self.spin_z1.setValue(z1)
+        self.spin_z2.setValue(z2)
+        self.spin_z3.setValue(z3)
+
+    def _on_auto_z_toggled(self, checked):
+        """Enable/disable the manual Z spinboxes depending on the checkbox state."""
+        for sp in (self.spin_z1, self.spin_z2, self.spin_z3):
+            sp.setEnabled(not checked)
+            sp.setReadOnly(checked)
+        if checked:
+            self._refresh_auto_z_display()
+
     def load_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open Image File", "",
+            self, "Open Image File",
+            self.last_opened_dir,   # start in last-used folder
             "Images (*.png *.jpg *.jpeg *.jfif *.avif *.webp *.bmp *.tiff *.heic);;All Files (*.*)"
         )
         if not file_path:
             return
-            
+
+        # Remember this folder for next time
+        self.last_opened_dir = os.path.dirname(file_path)
         self.loaded_image_path = file_path
         self.lbl_status.setText("🛠 Decoding intermediate file...")
         QApplication.processEvents()
@@ -507,6 +606,9 @@ class Manga3DApp(QMainWindow):
         self.viewer.setImage(self.img_filtered_array)
         self.btn_generate.setEnabled(True)
         self.lbl_status.setText("✅ Ready. Use the layer swatches to pick grey tones.")
+        # Refresh the auto-Z display whenever a new image is loaded
+        if self.chk_auto_z.isChecked():
+            self._refresh_auto_z_display()
 
     def set_active_swatch(self, idx):
         if self.img_filtered_array is None:
@@ -582,19 +684,21 @@ class Manga3DApp(QMainWindow):
             save_path_3mf = os.path.join(output_dir, f"{base_name}_3D_{counter}.3mf")
             counter += 1
 
-        # --- Compute color-change Z heights from the sampled threshold values ---
-        # Sort the 4 sampled grey values descending (brightest first)
-        s0, s1, s2, s3 = sorted(self.sampled_colors, reverse=True)
-        base_h  = self.spin_base.value()
-        max_h   = self.spin_maxh.value()
-        relief  = max_h - base_h
-        # The 3 terrain steps in normalised space are 0.33 / 0.66 / 1.0
-        # → map back to absolute Z heights
-        color_changes_z = [
-            round(base_h + 0.33 * relief, 3),   # L1 Light Gray level
-            round(base_h + 0.66 * relief, 3),   # L2 Dark Gray level
-            round(base_h + 1.00 * relief, 3),   # L3 Black/Inks peak
-        ]
+        # --- Compute or read color-change Z heights ---
+        base_h = self.spin_base.value()
+        max_h  = self.spin_maxh.value()
+        relief = max_h - base_h
+
+        if self.chk_auto_z.isChecked():
+            color_changes_z = self._compute_auto_z()
+            # Show computed values in the (read-only) spinboxes
+            self._refresh_auto_z_display()
+        else:
+            color_changes_z = [
+                round(self.spin_z1.value(), 3),
+                round(self.spin_z2.value(), 3),
+                round(self.spin_z3.value(), 3),
+            ]
 
         # --- Lock UI ---
         self.btn_load.setEnabled(False)
