@@ -110,63 +110,56 @@ QLabel {
 """
 
 # ---------------------------------------------------------------------------
-# .3MF EXPORT — XML skeleton constants (Bambu Studio / PrusaSlicer compatible)
+# .3MF EXPORT — Bambu Studio compatible (geometry via Trimesh, metadata injected)
 # ---------------------------------------------------------------------------
-_3MF_CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
-  <Default Extension="stl" ContentType="application/octet-stream"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-</Types>"""
-
-_3MF_RELS = """<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"
-    Target="/3D/model.stl"/>
-</Relationships>"""
-
 
 def export_3mf(mesh, output_path_3mf, color_changes_z):
     """
-    Exports a trimesh mesh as a .3mf archive compatible with Bambu Studio / PrusaSlicer.
+    Exports a Trimesh mesh as a valid .3mf file compatible with Bambu Studio.
 
-    The archive embeds the binary STL geometry and a Bambu_model_settings.xml
-    metadata file containing one <color_change> node per Z height supplied,
-    which triggers an automatic M600 (filament swap) pause during slicing.
+    Strategy:
+      1. Let Trimesh generate a spec-compliant .3mf (with proper XML geometry)
+         into an in-memory buffer.
+      2. Open that buffer as a ZIP archive in APPEND mode.
+      3. Inject the Bambu color-change metadata XML as an extra entry.
+      4. Write the final bytes to disk.
 
     Args:
         mesh (trimesh.Trimesh): The fully-built, watertight mesh object.
         output_path_3mf (str): Destination path, e.g. 'output/panel_3D.3mf'.
         color_changes_z (list[float]): Ascending list of Z heights (mm) at which
-            a color-change pause should be inserted, e.g. [1.0, 1.6, 2.2].
+            a color-change pause (M600) should be inserted, e.g. [1.0, 1.6, 2.5].
     """
-    # --- 1. Dump the mesh to an in-memory binary STL buffer (no temp file) ---
-    stl_buffer = io.BytesIO()
-    mesh.export(stl_buffer, file_type='stl')
-    stl_bytes = stl_buffer.getvalue()
+    # --- 1. Let Trimesh generate a geometrically valid .3mf in memory ---
+    # This produces the correct 3D/3dmodel.model XML that Bambu Studio requires.
+    tmf_buffer = io.BytesIO()
+    mesh.export(tmf_buffer, file_type='3mf')
+    tmf_buffer.seek(0)  # Rewind so zipfile can read from the beginning
 
     # --- 2. Build the Bambu color-change metadata XML ---
+    # One <color_change> node per halftone terrain level (e.g. 3 nodes for 3 levels)
     config = ET.Element("config")
     plate = ET.SubElement(config, "plate")
     ET.SubElement(plate, "metadata", name="schema_version", value="2")
 
-    # One <color_change> node per halftone level transition
     for z_height in sorted(color_changes_z):
         cc = ET.SubElement(plate, "color_change")
         cc.set("z", str(round(z_height, 3)))
-        cc.set("extruder", "1")  # Single-extruder: always extruder 1
+        cc.set("extruder", "1")  # Single-extruder workflow: always extruder 1
 
     settings_xml_bytes = ET.tostring(
         config, encoding='unicode', xml_declaration=False
     ).encode('utf-8')
 
-    # --- 3. Pack everything into the .3mf ZIP archive ---
-    with zipfile.ZipFile(output_path_3mf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", _3MF_CONTENT_TYPES)
-        zf.writestr("_rels/.rels", _3MF_RELS)
-        zf.writestr("3D/model.stl", stl_bytes)
+    # --- 3. Open the Trimesh-generated archive in APPEND mode and inject metadata ---
+    # 'a' mode adds files without touching existing entries.
+    with zipfile.ZipFile(tmf_buffer, 'a', zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("Metadata/Bambu_model_settings.xml", settings_xml_bytes)
+
+    # --- 4. Write the enriched archive buffer to disk ---
+    tmf_buffer.seek(0)
+    with open(output_path_3mf, 'wb') as f:
+        f.write(tmf_buffer.read())
 
 
 # ---------------------------------------------------------------------------
