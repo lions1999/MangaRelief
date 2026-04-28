@@ -234,7 +234,7 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, layer_height):
+                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
