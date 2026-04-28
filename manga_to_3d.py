@@ -234,7 +234,7 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200):
+                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -246,6 +246,7 @@ class MeshWorker(QThread):
         self.color_changes_z = color_changes_z
         self.layer_height = layer_height
         self.max_res_cap = max_res_cap
+        self.smart_decimate = smart_decimate
 
     def run(self):
         try:
@@ -325,6 +326,18 @@ class MeshWorker(QThread):
             
             mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
             trimesh.repair.fix_normals(mesh) # Necessario per renderlo watertight
+            
+            # Smart Optimization: decimate if face count exceeds threshold
+            if self.smart_decimate and len(mesh.faces) > 1_500_000:
+                target_faces = 900_000
+                self.progress.emit(92, f"Optimizing mesh geometry (Decimating {len(mesh.faces):,} → {target_faces:,} faces)...")
+                mesh = mesh.simplify_quadric_decimation(target_faces)
+                trimesh.repair.fix_normals(mesh)
+            elif self.smart_decimate and len(mesh.faces) > 500_000:
+                target_faces = int(len(mesh.faces) * 0.6)
+                self.progress.emit(92, f"Optimizing mesh geometry (Decimating {len(mesh.faces):,} → {target_faces:,} faces)...")
+                mesh = mesh.simplify_quadric_decimation(target_faces)
+                trimesh.repair.fix_normals(mesh)
             
             self.progress.emit(96, "Esportazione STL...")
             mesh.export(self.output_path)
@@ -523,6 +536,10 @@ class Manga3DApp(QMainWindow):
         self.cmb_quality.addItems(["Draft (800px)", "Standard (1200px)", "Ultra (1600px)"])
         self.cmb_quality.setCurrentIndex(1) # Default to Standard
         form_layout.addRow("Mesh Quality:", self.cmb_quality)
+
+        self.chk_smart_decimate = QCheckBox("Smart Optimization (Decimate)")
+        self.chk_smart_decimate.setChecked(True)
+        form_layout.addRow(self.chk_smart_decimate)
 
         group_params.setLayout(form_layout)
         right_layout.addWidget(group_params)
@@ -778,7 +795,8 @@ class Manga3DApp(QMainWindow):
             output_path_3mf=save_path_3mf,
             color_changes_z=color_changes_z,
             layer_height=self.spin_layer_height.value(),
-            max_res_cap=max_res_cap
+            max_res_cap=max_res_cap,
+            smart_decimate=self.chk_smart_decimate.isChecked()
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
