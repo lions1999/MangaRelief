@@ -1,6 +1,7 @@
 import sys
 import os
 import io
+import time
 import zipfile
 import xml.etree.ElementTree as ET
 import cv2
@@ -751,6 +752,7 @@ class Manga3DApp(QMainWindow):
             btn.setEnabled(False)
 
         # --- Launch background QThread ---
+        self.generation_start_time = time.time()
         self.worker = MeshWorker(
             img_filtered=self.img_filtered_array,
             sampled_values=self.sampled_colors,
@@ -780,7 +782,12 @@ class Manga3DApp(QMainWindow):
     def on_generate_done(self, stl_path, path_3mf):
         self.unlock_ui()
         self.progress_bar.setValue(100)
-        self.lbl_status.setText("🏁 STL + 3MF Export Completed!")
+        
+        elapsed = time.time() - getattr(self, 'generation_start_time', time.time())
+        mins, secs = divmod(int(elapsed), 60)
+        time_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
+        
+        self.lbl_status.setText(f"🏁 STL + 3MF Export Completed in {time_str}!")
 
         # Retrieve the Z values that were actually used
         z1 = self.spin_z1.value()
@@ -792,6 +799,7 @@ class Manga3DApp(QMainWindow):
             f"Files saved:\n"
             f"📄 STL → {stl_path}\n"
             f"🎨 3MF → {path_3mf}\n\n"
+            f"⏱️ Time elapsed: {time_str}\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"🎨  BAMBU STUDIO — Color Changes\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
