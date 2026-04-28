@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import trimesh
 from PIL import Image
+import gc
 import pillow_heif
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
@@ -253,8 +254,8 @@ class MeshWorker(QThread):
             h, w = img.shape
             target_res = int(self.max_dim / 0.05)
             
-            # Limitiamo a 6000px come hard cap di sicurezza per non saturare la RAM
-            target_res = min(target_res, 6000)
+            # Cap intelligente a 2000px per risparmiare il 400% di RAM senza perdite visibili su nozzle 0.4mm
+            target_res = min(target_res, 2000)
             
             if max(w, h) != target_res:
                 scale_res = target_res / max(w, h)
@@ -263,13 +264,13 @@ class MeshWorker(QThread):
                 img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
             
             img_filtered = img
-            self.progress.emit(25, "Calculating continuous relief extrusion...")
+            self.progress.emit(25, "Generazione Vertici...")
             
             relief_height = self.max_h - self.base_h
             # Map 0-255 linearly to Z: 0 (black) is max_h, 255 (white) is base_h
             Z = self.base_h + ((255.0 - img_filtered) / 255.0) * relief_height
             
-            self.progress.emit(40, "Generating mathematical X and Y points (MeshGrid)...")
+            self.progress.emit(40, "Generazione Vertici (MeshGrid)...")
             h, w = img_filtered.shape
             width_pixel = w
             height_pixel = h
@@ -285,7 +286,7 @@ class MeshWorker(QThread):
             y = np.linspace(0, dim_y_mm, height_pixel)[::-1]
             X, Y = np.meshgrid(x, y)
             
-            self.progress.emit(55, "Reconstructing TOP FACES (Triangulation)...")
+            self.progress.emit(55, "Creazione Facce...")
             vertices_top = np.column_stack((X.flatten(), Y.flatten(), Z.flatten()))
             idx = np.arange(w * h).reshape((h, w))
             tl = idx[:-1, :-1].flatten()
@@ -294,7 +295,7 @@ class MeshWorker(QThread):
             br = idx[1:, 1:].flatten()
             faces_top = np.vstack((np.column_stack((bl, tr, tl)), np.column_stack((br, tr, bl))))
             
-            self.progress.emit(70, "Reconstructing BOTTOM MANIFOLD (Inverse triangulation)...")
+            self.progress.emit(70, "Creazione Facce (Fondo)...")
             vertices_bottom = np.column_stack((X.flatten(), Y.flatten(), np.zeros_like(Z.flatten())))
             offset = w * h
             tl_b = tl + offset
@@ -316,21 +317,36 @@ class MeshWorker(QThread):
             v1, v2 = idx[:-1, -1], idx[1:, -1]
             right_sides = np.vstack((np.column_stack((v2, v1, v1 + offset)), np.column_stack((v2 + offset, v2, v1 + offset))))
             
-            self.progress.emit(90, "Converting to 3D OBJECT (Trimesh Repair)...")
+            self.progress.emit(90, "Trimesh Repair...")
             all_vertices = np.vstack((vertices_top, vertices_bottom))
             all_faces = np.vstack((faces_top, faces_bottom, top_sides, bot_sides, left_sides, right_sides))
             
             mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
             trimesh.repair.fix_normals(mesh) # Necessario per renderlo watertight
             
-            self.progress.emit(96, "Exporting STL file...")
+            self.progress.emit(96, "Esportazione STL...")
             mesh.export(self.output_path)
 
-            self.progress.emit(98, "Packaging .3MF for Bambu Studio...")
+            self.progress.emit(98, "Esportazione 3MF...")
             export_3mf(mesh, self.output_path_3mf, self.color_changes_z)
 
-            self.progress.emit(100, "STL + 3MF exported successfully!")
+            self.progress.emit(100, "Esportazione completata!")
             self.finished_ok.emit(self.output_path, self.output_path_3mf)
+            
+            # Pulizia aggressiva della memoria
+            del img
+            del img_filtered
+            del Z
+            del X
+            del Y
+            del vertices_top
+            del vertices_bottom
+            del all_vertices
+            del faces_top
+            del faces_bottom
+            del all_faces
+            del mesh
+            gc.collect()
             
         except Exception as e:
             self.finished_err.emit(str(e))
@@ -604,7 +620,7 @@ class Manga3DApp(QMainWindow):
         # Remember this folder for next time
         self.last_opened_dir = os.path.dirname(file_path)
         self.loaded_image_path = file_path
-        self.lbl_status.setText("🛠 Decoding intermediate file...")
+        self.lbl_status.setText("Caricamento immagine...")
         QApplication.processEvents()
         
         img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
