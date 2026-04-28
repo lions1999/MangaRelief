@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QFileDialog,
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
                              QSplitter, QProgressBar, QDoubleSpinBox, QSpinBox,
-                             QMessageBox, QGroupBox, QFormLayout, QCheckBox)
+                             QMessageBox, QGroupBox, QFormLayout, QCheckBox, QComboBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QIcon
 import ctypes
@@ -245,6 +245,7 @@ class MeshWorker(QThread):
         self.output_path_3mf = output_path_3mf
         self.color_changes_z = color_changes_z
         self.layer_height = layer_height
+        self.max_res_cap = max_res_cap
 
     def run(self):
         try:
@@ -255,8 +256,8 @@ class MeshWorker(QThread):
             h, w = img.shape
             target_res = int(self.max_dim / 0.05)
             
-            # Cap intelligente a 2000px per risparmiare il 400% di RAM senza perdite visibili su nozzle 0.4mm
-            target_res = min(target_res, 2000)
+            # Applichiamo il cap selezionato dall'utente per limitare i poligoni ed evitare tempi di slicing infiniti
+            target_res = min(target_res, self.max_res_cap)
             
             if max(w, h) != target_res:
                 scale_res = target_res / max(w, h)
@@ -518,6 +519,11 @@ class Manga3DApp(QMainWindow):
         self.spin_layer_height.setSingleStep(0.01)
         form_layout.addRow("Printing Layer Height (mm):", self.spin_layer_height)
 
+        self.cmb_quality = QComboBox()
+        self.cmb_quality.addItems(["Draft (800px)", "Standard (1200px)", "Ultra (1600px)"])
+        self.cmb_quality.setCurrentIndex(1) # Default to Standard
+        form_layout.addRow("Mesh Quality:", self.cmb_quality)
+
         group_params.setLayout(form_layout)
         right_layout.addWidget(group_params)
 
@@ -751,6 +757,15 @@ class Manga3DApp(QMainWindow):
         for btn in self.swatches:
             btn.setEnabled(False)
 
+        # --- Parse selected quality ---
+        quality_str = self.cmb_quality.currentText()
+        if "800" in quality_str:
+            max_res_cap = 800
+        elif "1600" in quality_str:
+            max_res_cap = 1600
+        else:
+            max_res_cap = 1200
+
         # --- Launch background QThread ---
         self.generation_start_time = time.time()
         self.worker = MeshWorker(
@@ -762,7 +777,8 @@ class Manga3DApp(QMainWindow):
             output_path=save_path_stl,
             output_path_3mf=save_path_3mf,
             color_changes_z=color_changes_z,
-            layer_height=self.spin_layer_height.value()
+            layer_height=self.spin_layer_height.value(),
+            max_res_cap=max_res_cap
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
