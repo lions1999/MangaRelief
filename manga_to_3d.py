@@ -232,7 +232,7 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, max_res, layer_height, flat_layers):
+                 output_path, output_path_3mf, color_changes_z, layer_height):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -242,42 +242,32 @@ class MeshWorker(QThread):
         self.output_path = output_path
         self.output_path_3mf = output_path_3mf
         self.color_changes_z = color_changes_z
-        self.max_res = max_res
         self.layer_height = layer_height
-        self.flat_layers = flat_layers
 
     def run(self):
         try:
             self.progress.emit(5, "Optimizing resolution for 3D mesh...")
             img = self.img_filtered
             
-            # Ridimensioniamo la foto solo per la costruzione del 3D, lasciando intatta l'alta risoluzione dell'interfaccia UI
+            # Ridimensioniamo la foto basandoci sulla Max Dim per garantire una fidelity di ~0.05mm/pixel
             h, w = img.shape
-            if w > self.max_res or h > self.max_res:
-                scale_res = self.max_res / max(w, h)
+            target_res = int(self.max_dim / 0.05)
+            
+            # Limitiamo a 6000px come hard cap di sicurezza per non saturare la RAM
+            target_res = min(target_res, 6000)
+            
+            if max(w, h) != target_res:
+                scale_res = target_res / max(w, h)
                 new_w, new_h = int(w * scale_res), int(h * scale_res)
-                img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                # Uso un'interpolazione di alta qualità per non distruggere i dettagli negli halftone
+                img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
             
             img_filtered = img
-            self.progress.emit(10, "Preparing logical matrices...")
+            self.progress.emit(25, "Calculating continuous relief extrusion...")
             
-            # Ordinamento soglie
-            s0, s1, s2, s3 = sorted(self.sampled_values, reverse=True)
-            th_1 = (s0 + s1) / 2.0
-            th_2 = (s1 + s2) / 2.0
-            th_3 = (s2 + s3) / 2.0
-            
-            if self.flat_layers:
-                self.progress.emit(25, "Calculating flat layers extrusion (Posterization)...")
-                Z = np.full_like(img_filtered, self.base_h, dtype=float)
-                Z[img_filtered < th_1] = self.color_changes_z[0]
-                Z[img_filtered < th_2] = self.color_changes_z[1]
-                Z[img_filtered < th_3] = self.color_changes_z[2]
-            else:
-                self.progress.emit(25, "Calculating continuous relief extrusion...")
-                relief_height = self.max_h - self.base_h
-                # Map 0-255 linearly to Z: 0 (black) is max_h, 255 (white) is base_h
-                Z = self.base_h + ((255.0 - img_filtered) / 255.0) * relief_height
+            relief_height = self.max_h - self.base_h
+            # Map 0-255 linearly to Z: 0 (black) is max_h, 255 (white) is base_h
+            Z = self.base_h + ((255.0 - img_filtered) / 255.0) * relief_height
             
             self.progress.emit(40, "Generating mathematical X and Y points (MeshGrid)...")
             h, w = img_filtered.shape
@@ -511,12 +501,6 @@ class Manga3DApp(QMainWindow):
         self.spin_layer_height.setSingleStep(0.01)
         form_layout.addRow("Printing Layer Height (mm):", self.spin_layer_height)
 
-        self.spin_res = QSpinBox()
-        self.spin_res.setRange(200, 4000)
-        self.spin_res.setValue(800)
-        self.spin_res.setSingleStep(100)
-        form_layout.addRow("Mesh Res. (px):", self.spin_res)
-
         group_params.setLayout(form_layout)
         right_layout.addWidget(group_params)
 
@@ -528,10 +512,6 @@ class Manga3DApp(QMainWindow):
         self.chk_auto_z.setChecked(True)
         self.chk_auto_z.toggled.connect(self._on_auto_z_toggled)
         z_layout.addRow(self.chk_auto_z)
-
-        self.chk_flat_layers = QCheckBox("Flat Layers Mode (Posterize)")
-        self.chk_flat_layers.setChecked(True)
-        z_layout.addRow(self.chk_flat_layers)
 
         self.spin_z1 = QDoubleSpinBox(); self.spin_z1.setRange(0.1, 50.0); self.spin_z1.setSingleStep(0.1)
         self.spin_z2 = QDoubleSpinBox(); self.spin_z2.setRange(0.1, 50.0); self.spin_z2.setSingleStep(0.1)
@@ -764,9 +744,7 @@ class Manga3DApp(QMainWindow):
             output_path=save_path_stl,
             output_path_3mf=save_path_3mf,
             color_changes_z=color_changes_z,
-            max_res=self.spin_res.value(),
-            layer_height=self.spin_layer_height.value(),
-            flat_layers=self.chk_flat_layers.isChecked()
+            layer_height=self.spin_layer_height.value()
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
