@@ -1,0 +1,8 @@
+numpy==1.26.4
+opencv-python==4.9.0.80
+trimesh==4.1.7
+networkx
+matplotlib
+pillow
+pillow-heif
+PyQt6
