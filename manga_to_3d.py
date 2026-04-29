@@ -93,18 +93,21 @@ QPushButton.swatch_active {
     border: 2px solid #f38ba8;
     background-color: #45475a;
 }
-QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox {
+QDoubleSpinBox, QSpinBox, QComboBox {
     background-color: #181825;
     color: #cdd6f4;
     border: 1px solid #45475a;
     border-radius: 4px;
-    padding: 2px 4px;
+    padding: 2px 25px 2px 4px; /* Aumentato padding destro per le freccette */
     font-size: 13px;
     min-height: 26px;
 }
 QCheckBox {
     background-color: transparent;
+    color: #cdd6f4;
     border: none;
+    font-size: 13px;
+    min-height: 26px;
 }
 QProgressBar {
     background-color: #181825;
