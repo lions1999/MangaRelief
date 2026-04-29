@@ -235,7 +235,7 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, clean_noise=True):
+                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -248,7 +248,8 @@ class MeshWorker(QThread):
         self.layer_height = layer_height
         self.max_res_cap = max_res_cap
         self.smart_decimate = smart_decimate
-        self.clean_noise = clean_noise
+        self.white_clip = white_clip
+        self.black_clip = black_clip
 
     def run(self):
         try:
@@ -270,14 +271,13 @@ class MeshWorker(QThread):
             
             img_filtered = img
             
-            if self.clean_noise:
-                self.progress.emit(20, "Applying Smart Pixel Snapping...")
-                # We need to ensure array is writable; slice assignment does it in-place
-                img_filtered = img_filtered.copy()
-                img_filtered[img_filtered >= 240] = 255
-                img_filtered[img_filtered <= 15] = 0
-                img_filtered[(img_filtered >= 165) & (img_filtered <= 175)] = 170
-                img_filtered[(img_filtered >= 80) & (img_filtered <= 90)] = 85
+            self.progress.emit(20, "Applying Smart Pixel Snapping (Clipping)...")
+            # We need to ensure array is writable; slice assignment does it in-place
+            img_filtered = img_filtered.copy()
+            img_filtered[img_filtered >= self.white_clip] = 255
+            img_filtered[img_filtered <= self.black_clip] = 0
+            img_filtered[(img_filtered >= 165) & (img_filtered <= 175)] = 170
+            img_filtered[(img_filtered >= 80) & (img_filtered <= 90)] = 85
                 
             self.progress.emit(25, "Generazione Vertici...")
             
@@ -565,10 +565,17 @@ class Manga3DApp(QMainWindow):
         self.chk_smart_decimate.setChecked(True)
         form_layout.addRow(self.chk_smart_decimate)
 
-        self.chk_clean_noise = QCheckBox("Clean Image Noise (Pixel Snapping)")
-        self.chk_clean_noise.setChecked(True)
-        self.chk_clean_noise.setToolTip("Flattens near-white/black pixels and stabilizes midtones to reduce 3D mesh complexity.")
-        form_layout.addRow(self.chk_clean_noise)
+        self.spin_white_clip = QSpinBox()
+        self.spin_white_clip.setRange(128, 255)
+        self.spin_white_clip.setValue(235)
+        self.spin_white_clip.setToolTip("Pixels lighter than this value become perfectly flat white background.")
+        form_layout.addRow("White Clip:", self.spin_white_clip)
+
+        self.spin_black_clip = QSpinBox()
+        self.spin_black_clip.setRange(0, 127)
+        self.spin_black_clip.setValue(15)
+        self.spin_black_clip.setToolTip("Pixels darker than this value become perfectly flat max height.")
+        form_layout.addRow("Black Clip:", self.spin_black_clip)
 
         group_params.setLayout(form_layout)
         right_layout.addWidget(group_params)
@@ -907,7 +914,8 @@ class Manga3DApp(QMainWindow):
             layer_height=self.spin_layer_height.value(),
             max_res_cap=max_res_cap,
             smart_decimate=self.chk_smart_decimate.isChecked(),
-            clean_noise=self.chk_clean_noise.isChecked()
+            white_clip=self.spin_white_clip.value(),
+            black_clip=self.spin_black_clip.value()
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
