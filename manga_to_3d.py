@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QFileDialog,
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
                              QSplitter, QProgressBar, QDoubleSpinBox, QSpinBox,
-                             QMessageBox, QGroupBox, QFormLayout, QCheckBox, QComboBox)
+                             QMessageBox, QGroupBox, QFormLayout, QCheckBox, QSlider)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QIcon
 import ctypes
@@ -566,10 +566,17 @@ class Manga3DApp(QMainWindow):
         self.chk_auto_z.toggled.connect(self._on_auto_z_toggled)
         z_layout.addRow(self.chk_auto_z)
 
-        self.cmb_color_mode = QComboBox()
-        self.cmb_color_mode.addItems(["Auto-Detect", "Force 2-Color (B&W)", "Force 4-Color (Halftone)"])
-        self.cmb_color_mode.currentIndexChanged.connect(self._refresh_color_mode)
-        z_layout.addRow("Color Mode:", self.cmb_color_mode)
+        # Halftone Threshold Slider
+        self.lbl_threshold = QLabel("Halftone Threshold: 10%")
+        self.slider_threshold = QSlider(Qt.Orientation.Horizontal)
+        self.slider_threshold.setRange(1, 50)
+        self.slider_threshold.setValue(10)
+        self.slider_threshold.valueChanged.connect(self._on_threshold_changed)
+        z_layout.addRow(self.lbl_threshold, self.slider_threshold)
+
+        self.lbl_real_midtones = QLabel("Image Halftones: N/A")
+        self.lbl_real_midtones.setStyleSheet("color: #aaaaaa; font-style: italic;")
+        z_layout.addRow("", self.lbl_real_midtones)
 
         self.lbl_z1 = QLabel("L1 Z (Light Gray):")
         self.lbl_z2 = QLabel("L2 Z (Dark Gray):")
@@ -588,8 +595,8 @@ class Manga3DApp(QMainWindow):
         group_z.setLayout(z_layout)
         right_layout.addWidget(group_z)
 
-        # Track halftone mode (True = 4-color, False = 2-color)
-        self.is_halftone_mode = True
+        # Track halftone mode (2, 3, or 4 colors)
+        self.color_mode_state = 4
         self.last_midtone_pct = 100.0 # Default value until image loads
 
         # Initialise the spinboxes to default computed values and set read-only
@@ -622,36 +629,37 @@ class Manga3DApp(QMainWindow):
         splitter.addWidget(right_panel)
         splitter.setSizes([850, 350])
 
+    def _on_threshold_changed(self, value):
+        self.lbl_threshold.setText(f"Halftone Threshold: {value}%")
+        self._refresh_color_mode()
+
     def _refresh_color_mode(self):
-        """Update color mode visibility and logic based on dropdown selection and midtone analysis."""
+        """Update color mode visibility and logic based on slider and midtone analysis."""
         if not hasattr(self, 'last_midtone_pct'):
             return
 
-        mode_str = self.cmb_color_mode.currentText()
-        if mode_str == "Force 2-Color (B&W)":
-            self.is_halftone_mode = False
-            self.lbl_color_mode.setText("⚫ 2-Color Mode (Forced)\nOnly 1 color-change point (L3) will be suggested.")
-        elif mode_str == "Force 4-Color (Halftone)":
-            self.is_halftone_mode = True
-            self.lbl_color_mode.setText("🎨 4-Color Mode (Forced)")
-        else: # Auto-Detect
-            if self.last_midtone_pct < 5.0:
-                self.is_halftone_mode = False
-                self.lbl_color_mode.setText(
-                    f"⚫ 2-Color Mode (Auto: B&W detected, midtones: {self.last_midtone_pct:.1f}%)\n"
-                    f"Only 1 color-change point (L3) will be suggested."
-                )
-            else:
-                self.is_halftone_mode = True
-                self.lbl_color_mode.setText(
-                    f"🎨 4-Color Mode (Auto: Halftone detected, midtones: {self.last_midtone_pct:.1f}%)"
-                )
+        threshold = self.slider_threshold.value()
+        real_midtones = self.last_midtone_pct
+        
+        if real_midtones < 100.0:  # If image is loaded
+            self.lbl_real_midtones.setText(f"Image Halftones: {real_midtones:.1f}%")
+
+        if real_midtones >= threshold:
+            self.color_mode_state = 4
+            self.lbl_color_mode.setText("🎨 4-Color Mode (Full Halftone)")
+        elif real_midtones >= (threshold / 2.0):
+            self.color_mode_state = 3
+            self.lbl_color_mode.setText("🌗 3-Color Mode (Partial Halftone)\nL1 hidden, L2/L3 active.")
+        else:
+            self.color_mode_state = 2
+            self.lbl_color_mode.setText("⚫ 2-Color Mode (B&W)\nL1/L2 hidden. L3 low and thick.")
 
         # Update visibility
-        self.lbl_z1.setVisible(self.is_halftone_mode)
-        self.spin_z1.setVisible(self.is_halftone_mode)
-        self.lbl_z2.setVisible(self.is_halftone_mode)
-        self.spin_z2.setVisible(self.is_halftone_mode)
+        self.lbl_z1.setVisible(self.color_mode_state == 4)
+        self.spin_z1.setVisible(self.color_mode_state == 4)
+        
+        self.lbl_z2.setVisible(self.color_mode_state >= 3)
+        self.spin_z2.setVisible(self.color_mode_state >= 3)
 
         # Recalculate Z based on new mode
         if self.chk_auto_z.isChecked():
@@ -664,19 +672,25 @@ class Manga3DApp(QMainWindow):
         layer_h = self.spin_layer_height.value()
         relief = max_h - base_h
         
+        mode = getattr(self, 'color_mode_state', 4)
+
         # Calculate theoretical heights
-        if hasattr(self, 'is_halftone_mode') and not self.is_halftone_mode:
-            # 2-color mode: L3 should be just above the base (e.g. Base + 2 * Layer Height)
+        if mode == 2:
             z1_theo = 0.0
             z2_theo = 0.0
             z3_theo = base_h + (layer_h * 2.0)
-            # Ensure z3 does not exceed max_h
-            if z3_theo > max_h:
-                z3_theo = max_h
-        else:
+        elif mode == 3:
+            z1_theo = 0.0
+            z2_theo = base_h + (layer_h * 2.0)
+            z3_theo = base_h + max(layer_h * 4.0, 0.66 * relief)
+        else: # mode == 4
             z1_theo = base_h + 0.33 * relief
             z2_theo = base_h + 0.66 * relief
             z3_theo = base_h + 1.00 * relief
+            
+        # Ensure they don't exceed max_h
+        z2_theo = min(z2_theo, max_h)
+        z3_theo = min(z3_theo, max_h)
         
         # Snap to nearest multiple of layer height
         z1 = round(z1_theo / layer_h) * layer_h
@@ -909,14 +923,20 @@ class Manga3DApp(QMainWindow):
         z3 = self.spin_z3.value()
 
         # Build color-change instructions based on detected mode
-        if self.is_halftone_mode:
+        mode = getattr(self, 'color_mode_state', 4)
+        if mode == 4:
             color_lines = (
                 f"  • L1 Light Gray  →  Z = {z1} mm  (Filament 2)\n"
                 f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 3)\n"
                 f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 4)\n"
             )
-        else:
-            # 2-color mode: only show L3 at midpoint
+        elif mode == 3:
+            color_lines = (
+                f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 2)\n"
+                f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 3)\n"
+            )
+        else: # mode == 2
+            # 2-color mode: only show L3
             color_lines = (
                 f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 2)\n"
             )
