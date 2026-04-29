@@ -46,88 +46,6 @@ try:
 except AttributeError:
     pass
 
-DARK_STYLESHEET = """
-QMainWindow {
-    background-color: #1e1e2e;
-    color: #cdd6f4;
-}
-QWidget {
-    color: #cdd6f4;
-    font-family: "Segoe UI", sans-serif;
-}
-QGroupBox {
-    border: 1px solid #45475a;
-    border-radius: 6px;
-    margin-top: 10px;
-    font-weight: bold;
-    padding-top: 15px;
-    font-size: 13px;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 10px;
-    padding: 0 3px 0 3px;
-}
-QPushButton {
-    background-color: #89b4fa;
-    color: #11111b;
-    border-radius: 4px;
-    padding: 4px 10px;
-    font-weight: bold;
-    font-size: 13px;
-    min-height: 24px;
-}
-QPushButton:hover {
-    background-color: #b4befe;
-}
-QPushButton:disabled {
-    background-color: #45475a;
-    color: #a6adc8;
-}
-QPushButton.swatch {
-    background-color: #313244;
-    color: #cdd6f4;
-    border: 2px solid #585b70;
-}
-QPushButton.swatch_active {
-    border: 2px solid #f38ba8;
-    background-color: #45475a;
-}
-QDoubleSpinBox, QSpinBox, QComboBox {
-    background-color: #181825;
-    color: #cdd6f4;
-    border: 1px solid #45475a;
-    border-radius: 4px;
-    padding: 2px 25px 2px 4px; /* Aumentato padding destro per le freccette */
-    font-size: 13px;
-    min-height: 26px;
-}
-QCheckBox {
-    background-color: transparent;
-    color: #cdd6f4;
-    border: none;
-    font-size: 13px;
-    min-height: 26px;
-}
-QProgressBar {
-    background-color: #181825;
-    border: 1px solid #45475a;
-    border-radius: 4px;
-    text-align: center;
-}
-QProgressBar::chunk {
-    background-color: #a6e3a1;
-    border-radius: 3px;
-}
-QLabel {
-    font-size: 13px;
-}
-QScrollArea {
-    border: none;
-    background-color: #1e1e2e;
-}
-"""
-
 # ---------------------------------------------------------------------------
 # .3MF EXPORT  —  Hybrid: Trimesh geometry + Bambu Studio metadata injection
 # ---------------------------------------------------------------------------
@@ -1057,7 +975,14 @@ class Manga3DApp(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyleSheet(DARK_STYLESHEET)
+    
+    # Caricamento dello stile dal file esterno QSS
+    try:
+        with open(resource_path("style.qss"), "r", encoding="utf-8") as f:
+            app.setStyleSheet(f.read())
+    except Exception as e:
+        print(f"Warning: Could not load style.qss: {e}")
+        
     window = Manga3DApp()
     window.show()
     sys.exit(app.exec())
