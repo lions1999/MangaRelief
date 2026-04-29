@@ -482,6 +482,8 @@ class Manga3DApp(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(1) # Rende il divisore quasi invisibile
+        splitter.handle(1).setCursor(Qt.CursorShape.ArrowCursor) # Impedisce al cursore di cambiare
         main_layout.addWidget(splitter)
         
         # --- LEFT PANEL: VIEWPORT ---
@@ -491,7 +493,7 @@ class Manga3DApp(QMainWindow):
         
         # --- RIGHT PANEL: CONTROLLI ---
         right_panel = QWidget()
-        right_panel.setFixedWidth(320) # Impedisce alla colonna laterale di allargarsi e restringersi
+        right_panel.setFixedWidth(400) # Ingrandita verso sinistra per far spazio ai controlli
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(10, 0, 10, 0)
         
@@ -663,7 +665,7 @@ class Manga3DApp(QMainWindow):
         right_layout.addWidget(self.lbl_status)
         
         splitter.addWidget(right_panel)
-        splitter.setSizes([850, 350])
+        splitter.setSizes([800, 400])
 
     def _on_threshold_changed(self, value):
         self.lbl_threshold.setText(f"Halftone Threshold: {value}%")
