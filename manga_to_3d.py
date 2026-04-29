@@ -566,15 +566,25 @@ class Manga3DApp(QMainWindow):
         self.chk_auto_z.toggled.connect(self._on_auto_z_toggled)
         z_layout.addRow(self.chk_auto_z)
 
+        self.lbl_z1 = QLabel("L1 Z (Light Gray):")
+        self.lbl_z2 = QLabel("L2 Z (Dark Gray):")
+        self.lbl_z3 = QLabel("L3 Z (Black/Inks):")
         self.spin_z1 = QDoubleSpinBox(); self.spin_z1.setRange(0.1, 50.0); self.spin_z1.setSingleStep(0.1)
         self.spin_z2 = QDoubleSpinBox(); self.spin_z2.setRange(0.1, 50.0); self.spin_z2.setSingleStep(0.1)
         self.spin_z3 = QDoubleSpinBox(); self.spin_z3.setRange(0.1, 50.0); self.spin_z3.setSingleStep(0.1)
-        z_layout.addRow("L1 Z (Light Gray):", self.spin_z1)
-        z_layout.addRow("L2 Z (Dark Gray):",  self.spin_z2)
-        z_layout.addRow("L3 Z (Black/Inks):", self.spin_z3)
+        z_layout.addRow(self.lbl_z1, self.spin_z1)
+        z_layout.addRow(self.lbl_z2, self.spin_z2)
+        z_layout.addRow(self.lbl_z3, self.spin_z3)
+
+        self.lbl_color_mode = QLabel("")
+        self.lbl_color_mode.setWordWrap(True)
+        z_layout.addRow(self.lbl_color_mode)
 
         group_z.setLayout(z_layout)
         right_layout.addWidget(group_z)
+
+        # Track halftone mode (True = 4-color, False = 2-color)
+        self.is_halftone_mode = True
 
         # Initialise the spinboxes to default computed values and set read-only
         self._refresh_auto_z_display()
@@ -685,7 +695,38 @@ class Manga3DApp(QMainWindow):
         
         self.viewer.setImage(self.img_filtered_array)
         self.btn_generate.setEnabled(True)
-        self.lbl_status.setText("✅ Ready. Use the layer swatches to pick grey tones.")
+
+        # --- Auto-Color Depth Analysis ---
+        total_pixels = self.img_filtered_array.size
+        midtone_pixels = np.count_nonzero(
+            (self.img_filtered_array > 30) & (self.img_filtered_array < 225)
+        )
+        midtone_pct = (midtone_pixels / total_pixels) * 100.0
+
+        if midtone_pct < 5.0:
+            # High-contrast B&W image → 2-color mode
+            self.is_halftone_mode = False
+            self.lbl_z1.setVisible(False)
+            self.spin_z1.setVisible(False)
+            self.lbl_z2.setVisible(False)
+            self.spin_z2.setVisible(False)
+            self.lbl_color_mode.setText(
+                f"⚫ 2-Color Mode (B&W detected, midtones: {midtone_pct:.1f}%)\n"
+                f"Only 1 color-change point (L3) will be suggested."
+            )
+            self.lbl_status.setText("✅ Ready. High-contrast B&W detected → 2-color mode.")
+        else:
+            # Halftone / grayscale image → 4-color mode
+            self.is_halftone_mode = True
+            self.lbl_z1.setVisible(True)
+            self.spin_z1.setVisible(True)
+            self.lbl_z2.setVisible(True)
+            self.spin_z2.setVisible(True)
+            self.lbl_color_mode.setText(
+                f"🎨 4-Color Mode (Halftone detected, midtones: {midtone_pct:.1f}%)"
+            )
+            self.lbl_status.setText("✅ Ready. Halftone image detected → 4-color mode.")
+
         # Refresh the auto-Z display whenever a new image is loaded
         if self.chk_auto_z.isChecked():
             self._refresh_auto_z_display()
@@ -841,6 +882,19 @@ class Manga3DApp(QMainWindow):
         z2 = self.spin_z2.value()
         z3 = self.spin_z3.value()
 
+        # Build color-change instructions based on detected mode
+        if self.is_halftone_mode:
+            color_lines = (
+                f"  • L1 Light Gray  →  Z = {z1} mm  (Filament 2)\n"
+                f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 3)\n"
+                f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 4)\n"
+            )
+        else:
+            # 2-color mode: only show L3 at midpoint
+            color_lines = (
+                f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 2)\n"
+            )
+
         QMessageBox.information(
             self, "Export Successful",
             f"Files saved:\n"
@@ -852,9 +906,11 @@ class Manga3DApp(QMainWindow):
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"After slicing, add these layer pauses\n"
             f"via the colored bar on the right side:\n\n"
-            f"  • L1 Light Gray  →  Z = {z1} mm  (Filament 2)\n"
-            f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 3)\n"
-            f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 4)\n"
+            f"{color_lines}\n"
+            f"💡 PRO TIP: For high-detail manga panels,\n"
+            f"set Wall Generator to Arachne in Bambu Studio.\n"
+            f"This prevents fine lines and small details\n"
+            f"from disappearing during slicing!"
         )
 
     def on_generate_error(self, err_msg):
