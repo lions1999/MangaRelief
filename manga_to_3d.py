@@ -482,8 +482,6 @@ class Manga3DApp(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(1) # Rende il divisore quasi invisibile
-        splitter.handle(1).setCursor(Qt.CursorShape.ArrowCursor) # Impedisce al cursore di cambiare
         main_layout.addWidget(splitter)
         
         # --- LEFT PANEL: VIEWPORT ---
@@ -666,6 +664,11 @@ class Manga3DApp(QMainWindow):
         
         splitter.addWidget(right_panel)
         splitter.setSizes([800, 400])
+        
+        # Configura il divisore dopo aver aggiunto i widget (altrimenti l'handle non esiste)
+        splitter.setHandleWidth(1)
+        splitter.handle(1).setCursor(Qt.CursorShape.ArrowCursor)
+        splitter.handle(1).setEnabled(False) # Disabilita completamente il trascinamento
 
     def _on_threshold_changed(self, value):
         self.lbl_threshold.setText(f"Halftone Threshold: {value}%")
