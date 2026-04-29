@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QFileDialog,
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
                              QSplitter, QProgressBar, QDoubleSpinBox, QSpinBox,
-                             QMessageBox, QGroupBox, QFormLayout, QCheckBox, QSlider, QComboBox, QSizePolicy)
+                             QMessageBox, QGroupBox, QFormLayout, QCheckBox, QSlider, QComboBox, QSizePolicy, QScrollArea)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QIcon
 import ctypes
@@ -476,7 +476,7 @@ class Manga3DApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("MangaRelief Pro")
         self.setWindowIcon(QIcon(resource_path('icon.ico')))
-        self.resize(1200, 800)
+        self.resize(1240, 720) # Height reduced for 1080p screens, scroll area handles overflow
 
         self.img_filtered_array = None
         self.active_swatch_index = None
@@ -501,11 +501,19 @@ class Manga3DApp(QMainWindow):
         self.viewer.pixelClicked.connect(self.on_pixel_clicked)
         splitter.addWidget(self.viewer)
         
-        # --- RIGHT PANEL: CONTROLLI ---
+        # --- RIGHT PANEL: CONTROLLI (Wrapped in ScrollArea) ---
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFixedWidth(420) # 400 + space for scrollbar
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.scroll_area.setStyleSheet("background-color: #1e1e2e; border: none;")
+        splitter.addWidget(self.scroll_area)
+
         right_panel = QWidget()
-        right_panel.setFixedWidth(400) # Ingrandita verso sinistra per far spazio ai controlli
+        self.scroll_area.setWidget(right_panel)
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(10, 0, 10, 0)
+        right_layout.setContentsMargins(10, 5, 15, 5)
         
         self.btn_load = QPushButton("📂 Load Manga")
         self.btn_load.clicked.connect(self.load_image)
@@ -675,8 +683,8 @@ class Manga3DApp(QMainWindow):
         self.lbl_status.setFixedHeight(40) # Altezza fissa per prevenire sbalzi
         right_layout.addWidget(self.lbl_status)
         
-        splitter.addWidget(right_panel)
-        splitter.setSizes([800, 400])
+        splitter.addWidget(self.scroll_area)
+        splitter.setSizes([800, 420])
         
         # Configura il divisore dopo aver aggiunto i widget (altrimenti l'handle non esiste)
         splitter.setHandleWidth(1)
