@@ -61,6 +61,7 @@ QGroupBox {
     margin-top: 10px;
     font-weight: bold;
     padding-top: 15px;
+    font-size: 13px;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
@@ -92,7 +93,7 @@ QPushButton.swatch_active {
     border: 2px solid #f38ba8;
     background-color: #45475a;
 }
-QDoubleSpinBox, QSpinBox, QComboBox {
+QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox {
     background-color: #181825;
     color: #cdd6f4;
     border: 1px solid #45475a;
@@ -100,6 +101,10 @@ QDoubleSpinBox, QSpinBox, QComboBox {
     padding: 4px;
     font-size: 13px;
     min-height: 24px;
+}
+QCheckBox {
+    background-color: transparent;
+    border: none;
 }
 QProgressBar {
     background-color: #181825;
