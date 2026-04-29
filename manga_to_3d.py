@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QFileDialog,
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
                              QSplitter, QProgressBar, QDoubleSpinBox, QSpinBox,
-                             QMessageBox, QGroupBox, QFormLayout, QCheckBox, QSlider)
+                             QMessageBox, QGroupBox, QFormLayout, QCheckBox, QSlider, QComboBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QIcon
 import ctypes
