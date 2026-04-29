@@ -569,7 +569,16 @@ class Manga3DApp(QMainWindow):
         self.spin_white_clip.setRange(128, 255)
         self.spin_white_clip.setValue(235)
         self.spin_white_clip.setToolTip("Pixels lighter than this value become perfectly flat white background.")
-        form_layout.addRow("White Clip:", self.spin_white_clip)
+        
+        self.btn_auto_white = QPushButton("\ud83e\ude84 Auto: --")
+        self.btn_auto_white.setFixedWidth(80)
+        self.btn_auto_white.clicked.connect(self._apply_auto_white)
+        self.btn_auto_white.setEnabled(False)
+
+        white_clip_layout = QHBoxLayout()
+        white_clip_layout.addWidget(self.spin_white_clip)
+        white_clip_layout.addWidget(self.btn_auto_white)
+        form_layout.addRow("White Clip:", white_clip_layout)
 
         self.spin_black_clip = QSpinBox()
         self.spin_black_clip.setRange(0, 127)
@@ -655,6 +664,11 @@ class Manga3DApp(QMainWindow):
     def _on_threshold_changed(self, value):
         self.lbl_threshold.setText(f"Halftone Threshold: {value}%")
         self._refresh_color_mode()
+
+    def _apply_auto_white(self):
+        """Apply the suggested white clip value calculated during image analysis."""
+        if hasattr(self, 'auto_white_suggestion'):
+            self.spin_white_clip.setValue(self.auto_white_suggestion)
 
     def _refresh_color_mode(self):
         """Update color mode visibility and logic based on slider and midtone analysis."""
@@ -789,6 +803,21 @@ class Manga3DApp(QMainWindow):
             (self.img_filtered_array > 30) & (self.img_filtered_array < 225)
         )
         self.last_midtone_pct = (midtone_pixels / total_pixels) * 100.0
+
+        # --- Auto-White Clip Suggestion Logic ---
+        # Calculate histogram to find the white background peak
+        hist = cv2.calcHist([self.img_filtered_array], [0], None, [256], [0, 256])
+        # Find the most frequent value in the highlights (200-255)
+        white_peak_bin = 200 + np.argmax(hist[200:])
+        
+        # Suggest a value just below the peak to swallow JPEG noise
+        # We look for where the distribution starts rising towards the peak
+        suggested_white = white_peak_bin - 15
+        
+        # Safety bounds
+        self.auto_white_suggestion = int(np.clip(suggested_white, 180, 250))
+        self.btn_auto_white.setText(f"\ud83e\ude84 {self.auto_white_suggestion}")
+        self.btn_auto_white.setEnabled(True)
 
         # Trigger real-time UI update based on new midtone percentage
         self._refresh_color_mode()
