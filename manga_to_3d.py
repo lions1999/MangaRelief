@@ -568,6 +568,7 @@ class Manga3DApp(QMainWindow):
         self.spin_white_clip = QSpinBox()
         self.spin_white_clip.setRange(128, 255)
         self.spin_white_clip.setValue(235)
+        self.spin_white_clip.setMinimumWidth(70)
         self.spin_white_clip.setToolTip("Pixels lighter than this value become perfectly flat white background.")
         
         self.btn_auto_white = QPushButton("\ud83e\ude84 Auto: --")
@@ -576,7 +577,9 @@ class Manga3DApp(QMainWindow):
         self.btn_auto_white.setEnabled(False)
 
         white_clip_layout = QHBoxLayout()
-        white_clip_layout.addWidget(self.spin_white_clip)
+        white_clip_layout.setSpacing(5)
+        white_clip_layout.setContentsMargins(0, 0, 0, 0)
+        white_clip_layout.addWidget(self.spin_white_clip, 1) # Stretch factor to keep spinbox visible
         white_clip_layout.addWidget(self.btn_auto_white)
         form_layout.addRow("White Clip:", white_clip_layout)
 
