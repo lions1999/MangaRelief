@@ -122,6 +122,10 @@ QProgressBar::chunk {
 QLabel {
     font-size: 13px;
 }
+QScrollArea {
+    border: none;
+    background-color: #1e1e2e;
+}
 """
 
 # ---------------------------------------------------------------------------
@@ -507,7 +511,6 @@ class Manga3DApp(QMainWindow):
         self.scroll_area.setFixedWidth(420) # 400 + space for scrollbar
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.scroll_area.setStyleSheet("background-color: #1e1e2e; border: none;")
         splitter.addWidget(self.scroll_area)
 
         right_panel = QWidget()
