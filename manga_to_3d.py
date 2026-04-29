@@ -568,8 +568,7 @@ class Manga3DApp(QMainWindow):
 
         self.cmb_color_mode = QComboBox()
         self.cmb_color_mode.addItems(["Auto-Detect", "Force 2-Color (B&W)", "Force 4-Color (Halftone)"])
-        self.cmb_color_mode.setCurrentIndex(0)
-        self.cmb_color_mode.currentIndexChanged.connect(self._on_color_mode_or_param_changed)
+        self.cmb_color_mode.currentIndexChanged.connect(self._refresh_color_mode)
         z_layout.addRow("Color Mode:", self.cmb_color_mode)
 
         self.lbl_z1 = QLabel("L1 Z (Light Gray):")
@@ -591,17 +590,16 @@ class Manga3DApp(QMainWindow):
 
         # Track halftone mode (True = 4-color, False = 2-color)
         self.is_halftone_mode = True
-        # Cache the auto-detected midtone percentage
-        self._last_midtone_pct = None
+        self.last_midtone_pct = 100.0 # Default value until image loads
 
         # Initialise the spinboxes to default computed values and set read-only
-        self._update_color_mode_and_z()
+        self._refresh_auto_z_display()
         self._on_auto_z_toggled(True)
 
         # Live-refresh Z display whenever physical parameters change
-        self.spin_base.valueChanged.connect(self._on_color_mode_or_param_changed)
-        self.spin_maxh.valueChanged.connect(self._on_color_mode_or_param_changed)
-        self.spin_layer_height.valueChanged.connect(self._on_color_mode_or_param_changed)
+        self.spin_base.valueChanged.connect(self._on_physical_param_changed)
+        self.spin_maxh.valueChanged.connect(self._on_physical_param_changed)
+        self.spin_layer_height.valueChanged.connect(self._on_physical_param_changed)
         
         right_layout.addStretch()
 
@@ -624,71 +622,80 @@ class Manga3DApp(QMainWindow):
         splitter.addWidget(right_panel)
         splitter.setSizes([850, 350])
 
-    def _update_color_mode_and_z(self):
-        """Centralized method: determine color mode (2 vs 4) and recompute Z values.
-        Called on image load, parameter change, and color mode selector change."""
+    def _refresh_color_mode(self):
+        """Update color mode visibility and logic based on dropdown selection and midtone analysis."""
+        if not hasattr(self, 'last_midtone_pct'):
+            return
+
+        mode_str = self.cmb_color_mode.currentText()
+        if mode_str == "Force 2-Color (B&W)":
+            self.is_halftone_mode = False
+            self.lbl_color_mode.setText("⚫ 2-Color Mode (Forced)\nOnly 1 color-change point (L3) will be suggested.")
+        elif mode_str == "Force 4-Color (Halftone)":
+            self.is_halftone_mode = True
+            self.lbl_color_mode.setText("🎨 4-Color Mode (Forced)")
+        else: # Auto-Detect
+            if self.last_midtone_pct < 5.0:
+                self.is_halftone_mode = False
+                self.lbl_color_mode.setText(
+                    f"⚫ 2-Color Mode (Auto: B&W detected, midtones: {self.last_midtone_pct:.1f}%)\n"
+                    f"Only 1 color-change point (L3) will be suggested."
+                )
+            else:
+                self.is_halftone_mode = True
+                self.lbl_color_mode.setText(
+                    f"🎨 4-Color Mode (Auto: Halftone detected, midtones: {self.last_midtone_pct:.1f}%)"
+                )
+
+        # Update visibility
+        self.lbl_z1.setVisible(self.is_halftone_mode)
+        self.spin_z1.setVisible(self.is_halftone_mode)
+        self.lbl_z2.setVisible(self.is_halftone_mode)
+        self.spin_z2.setVisible(self.is_halftone_mode)
+
+        # Recalculate Z based on new mode
+        if self.chk_auto_z.isChecked():
+            self._refresh_auto_z_display()
+
+    def _compute_auto_z(self):
+        """Return the 3 auto-computed color-change Z heights based on current spinbox values, snapped to layer height."""
         base_h = self.spin_base.value()
         max_h  = self.spin_maxh.value()
         layer_h = self.spin_layer_height.value()
         relief = max_h - base_h
-
-        # --- Determine color mode ---
-        mode_idx = self.cmb_color_mode.currentIndex()
-        if mode_idx == 1:
-            # Force 2-Color
-            use_4color = False
-            mode_source = "Forced"
-        elif mode_idx == 2:
-            # Force 4-Color
-            use_4color = True
-            mode_source = "Forced"
+        
+        # Calculate theoretical heights
+        if hasattr(self, 'is_halftone_mode') and not self.is_halftone_mode:
+            # 2-color mode: L3 should be just above the base (e.g. Base + 2 * Layer Height)
+            z1_theo = 0.0
+            z2_theo = 0.0
+            z3_theo = base_h + (layer_h * 2.0)
+            # Ensure z3 does not exceed max_h
+            if z3_theo > max_h:
+                z3_theo = max_h
         else:
-            # Auto-Detect based on cached midtone analysis
-            if self._last_midtone_pct is not None:
-                use_4color = self._last_midtone_pct >= 5.0
-                mode_source = f"Auto, midtones: {self._last_midtone_pct:.1f}%"
-            else:
-                use_4color = True  # Default before any image is loaded
-                mode_source = "Default (no image)"
-
-        self.is_halftone_mode = use_4color
-
-        # --- Update UI visibility ---
-        self.lbl_z1.setVisible(use_4color)
-        self.spin_z1.setVisible(use_4color)
-        self.lbl_z2.setVisible(use_4color)
-        self.spin_z2.setVisible(use_4color)
-
-        # --- Compute Z values ---
-        if use_4color:
-            # 4-color: three evenly-spaced steps snapped to layer height
             z1_theo = base_h + 0.33 * relief
             z2_theo = base_h + 0.66 * relief
             z3_theo = base_h + 1.00 * relief
-            z1 = round(round(z1_theo / layer_h) * layer_h, 3)
-            z2 = round(round(z2_theo / layer_h) * layer_h, 3)
-            z3 = round(round(z3_theo / layer_h) * layer_h, 3)
-            self.lbl_color_mode.setText(f"\U0001f3a8 4-Color Mode ({mode_source})")
-        else:
-            # 2-color: L3 placed just above base (2-3 layers up) so all relief prints dark
-            z1 = base_h
-            z2 = base_h
-            z3 = round(base_h + layer_h * 3, 3)
-            self.lbl_color_mode.setText(
-                f"\u26ab 2-Color Mode ({mode_source})\n"
-                f"L3 set to Base + 3 layers = {z3} mm"
-            )
+        
+        # Snap to nearest multiple of layer height
+        z1 = round(z1_theo / layer_h) * layer_h
+        z2 = round(z2_theo / layer_h) * layer_h
+        z3 = round(z3_theo / layer_h) * layer_h
+        
+        return [round(z1, 3), round(z2, 3), round(z3, 3)]
 
-        # --- Write to spinboxes if auto mode is on ---
-        if self.chk_auto_z.isChecked():
-            self.spin_z1.setValue(z1)
-            self.spin_z2.setValue(z2)
-            self.spin_z3.setValue(z3)
+    def _refresh_auto_z_display(self):
+        """Update the Z spinboxes with the currently computed auto values (read-only display)."""
+        z1, z2, z3 = self._compute_auto_z()
+        self.spin_z1.setValue(z1)
+        self.spin_z2.setValue(z2)
+        self.spin_z3.setValue(z3)
 
-    def _on_color_mode_or_param_changed(self, *args):
-        """Called whenever Base, MaxZ, Layer Height, or Color Mode selector changes."""
+    def _on_physical_param_changed(self):
+        """Called whenever Base or MaxZ spinboxes change — refresh Z display if auto mode is on."""
         if self.chk_auto_z.isChecked():
-            self._update_color_mode_and_z()
+            self._refresh_auto_z_display()
 
     def _on_auto_z_toggled(self, checked):
         """Enable/disable the manual Z spinboxes depending on the checkbox state."""
@@ -696,7 +703,7 @@ class Manga3DApp(QMainWindow):
             sp.setEnabled(not checked)
             sp.setReadOnly(checked)
         if checked:
-            self._update_color_mode_and_z()
+            self._refresh_auto_z_display()
 
     def load_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -739,20 +746,16 @@ class Manga3DApp(QMainWindow):
         self.viewer.setImage(self.img_filtered_array)
         self.btn_generate.setEnabled(True)
 
-        # --- Auto-Color Depth Analysis (cache result) ---
+        # --- Auto-Color Depth Analysis ---
         total_pixels = self.img_filtered_array.size
         midtone_pixels = np.count_nonzero(
             (self.img_filtered_array > 30) & (self.img_filtered_array < 225)
         )
-        self._last_midtone_pct = (midtone_pixels / total_pixels) * 100.0
+        self.last_midtone_pct = (midtone_pixels / total_pixels) * 100.0
 
-        # Trigger the unified update (will auto-detect or follow forced mode)
-        self._update_color_mode_and_z()
-
-        if self.is_halftone_mode:
-            self.lbl_status.setText("\u2705 Ready. Halftone image detected \u2192 4-color mode.")
-        else:
-            self.lbl_status.setText("\u2705 Ready. High-contrast B&W detected \u2192 2-color mode.")
+        # Trigger real-time UI update based on new midtone percentage
+        self._refresh_color_mode()
+        self.lbl_status.setText("✅ Ready. Use the layer swatches to pick grey tones.")
 
     def set_active_swatch(self, idx):
         if self.img_filtered_array is None:
