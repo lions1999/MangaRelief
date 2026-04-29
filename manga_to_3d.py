@@ -566,6 +566,12 @@ class Manga3DApp(QMainWindow):
         self.chk_auto_z.toggled.connect(self._on_auto_z_toggled)
         z_layout.addRow(self.chk_auto_z)
 
+        self.cmb_color_mode = QComboBox()
+        self.cmb_color_mode.addItems(["Auto-Detect", "Force 2-Color (B&W)", "Force 4-Color (Halftone)"])
+        self.cmb_color_mode.setCurrentIndex(0)
+        self.cmb_color_mode.currentIndexChanged.connect(self._on_color_mode_or_param_changed)
+        z_layout.addRow("Color Mode:", self.cmb_color_mode)
+
         self.lbl_z1 = QLabel("L1 Z (Light Gray):")
         self.lbl_z2 = QLabel("L2 Z (Dark Gray):")
         self.lbl_z3 = QLabel("L3 Z (Black/Inks):")
@@ -585,15 +591,17 @@ class Manga3DApp(QMainWindow):
 
         # Track halftone mode (True = 4-color, False = 2-color)
         self.is_halftone_mode = True
+        # Cache the auto-detected midtone percentage
+        self._last_midtone_pct = None
 
         # Initialise the spinboxes to default computed values and set read-only
-        self._refresh_auto_z_display()
+        self._update_color_mode_and_z()
         self._on_auto_z_toggled(True)
 
         # Live-refresh Z display whenever physical parameters change
-        self.spin_base.valueChanged.connect(self._on_physical_param_changed)
-        self.spin_maxh.valueChanged.connect(self._on_physical_param_changed)
-        self.spin_layer_height.valueChanged.connect(self._on_physical_param_changed)
+        self.spin_base.valueChanged.connect(self._on_color_mode_or_param_changed)
+        self.spin_maxh.valueChanged.connect(self._on_color_mode_or_param_changed)
+        self.spin_layer_height.valueChanged.connect(self._on_color_mode_or_param_changed)
         
         right_layout.addStretch()
 
@@ -616,36 +624,71 @@ class Manga3DApp(QMainWindow):
         splitter.addWidget(right_panel)
         splitter.setSizes([850, 350])
 
-    def _compute_auto_z(self):
-        """Return the 3 auto-computed color-change Z heights based on current spinbox values, snapped to layer height."""
+    def _update_color_mode_and_z(self):
+        """Centralized method: determine color mode (2 vs 4) and recompute Z values.
+        Called on image load, parameter change, and color mode selector change."""
         base_h = self.spin_base.value()
         max_h  = self.spin_maxh.value()
         layer_h = self.spin_layer_height.value()
         relief = max_h - base_h
-        
-        # Calculate theoretical heights
-        z1_theo = base_h + 0.33 * relief
-        z2_theo = base_h + 0.66 * relief
-        z3_theo = base_h + 1.00 * relief
-        
-        # Snap to nearest multiple of layer height
-        z1 = round(z1_theo / layer_h) * layer_h
-        z2 = round(z2_theo / layer_h) * layer_h
-        z3 = round(z3_theo / layer_h) * layer_h
-        
-        return [round(z1, 3), round(z2, 3), round(z3, 3)]
 
-    def _refresh_auto_z_display(self):
-        """Update the Z spinboxes with the currently computed auto values (read-only display)."""
-        z1, z2, z3 = self._compute_auto_z()
-        self.spin_z1.setValue(z1)
-        self.spin_z2.setValue(z2)
-        self.spin_z3.setValue(z3)
+        # --- Determine color mode ---
+        mode_idx = self.cmb_color_mode.currentIndex()
+        if mode_idx == 1:
+            # Force 2-Color
+            use_4color = False
+            mode_source = "Forced"
+        elif mode_idx == 2:
+            # Force 4-Color
+            use_4color = True
+            mode_source = "Forced"
+        else:
+            # Auto-Detect based on cached midtone analysis
+            if self._last_midtone_pct is not None:
+                use_4color = self._last_midtone_pct >= 5.0
+                mode_source = f"Auto, midtones: {self._last_midtone_pct:.1f}%"
+            else:
+                use_4color = True  # Default before any image is loaded
+                mode_source = "Default (no image)"
 
-    def _on_physical_param_changed(self):
-        """Called whenever Base or MaxZ spinboxes change — refresh Z display if auto mode is on."""
+        self.is_halftone_mode = use_4color
+
+        # --- Update UI visibility ---
+        self.lbl_z1.setVisible(use_4color)
+        self.spin_z1.setVisible(use_4color)
+        self.lbl_z2.setVisible(use_4color)
+        self.spin_z2.setVisible(use_4color)
+
+        # --- Compute Z values ---
+        if use_4color:
+            # 4-color: three evenly-spaced steps snapped to layer height
+            z1_theo = base_h + 0.33 * relief
+            z2_theo = base_h + 0.66 * relief
+            z3_theo = base_h + 1.00 * relief
+            z1 = round(round(z1_theo / layer_h) * layer_h, 3)
+            z2 = round(round(z2_theo / layer_h) * layer_h, 3)
+            z3 = round(round(z3_theo / layer_h) * layer_h, 3)
+            self.lbl_color_mode.setText(f"\U0001f3a8 4-Color Mode ({mode_source})")
+        else:
+            # 2-color: L3 placed just above base (2-3 layers up) so all relief prints dark
+            z1 = base_h
+            z2 = base_h
+            z3 = round(base_h + layer_h * 3, 3)
+            self.lbl_color_mode.setText(
+                f"\u26ab 2-Color Mode ({mode_source})\n"
+                f"L3 set to Base + 3 layers = {z3} mm"
+            )
+
+        # --- Write to spinboxes if auto mode is on ---
         if self.chk_auto_z.isChecked():
-            self._refresh_auto_z_display()
+            self.spin_z1.setValue(z1)
+            self.spin_z2.setValue(z2)
+            self.spin_z3.setValue(z3)
+
+    def _on_color_mode_or_param_changed(self, *args):
+        """Called whenever Base, MaxZ, Layer Height, or Color Mode selector changes."""
+        if self.chk_auto_z.isChecked():
+            self._update_color_mode_and_z()
 
     def _on_auto_z_toggled(self, checked):
         """Enable/disable the manual Z spinboxes depending on the checkbox state."""
@@ -653,7 +696,7 @@ class Manga3DApp(QMainWindow):
             sp.setEnabled(not checked)
             sp.setReadOnly(checked)
         if checked:
-            self._refresh_auto_z_display()
+            self._update_color_mode_and_z()
 
     def load_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -696,40 +739,20 @@ class Manga3DApp(QMainWindow):
         self.viewer.setImage(self.img_filtered_array)
         self.btn_generate.setEnabled(True)
 
-        # --- Auto-Color Depth Analysis ---
+        # --- Auto-Color Depth Analysis (cache result) ---
         total_pixels = self.img_filtered_array.size
         midtone_pixels = np.count_nonzero(
             (self.img_filtered_array > 30) & (self.img_filtered_array < 225)
         )
-        midtone_pct = (midtone_pixels / total_pixels) * 100.0
+        self._last_midtone_pct = (midtone_pixels / total_pixels) * 100.0
 
-        if midtone_pct < 5.0:
-            # High-contrast B&W image → 2-color mode
-            self.is_halftone_mode = False
-            self.lbl_z1.setVisible(False)
-            self.spin_z1.setVisible(False)
-            self.lbl_z2.setVisible(False)
-            self.spin_z2.setVisible(False)
-            self.lbl_color_mode.setText(
-                f"⚫ 2-Color Mode (B&W detected, midtones: {midtone_pct:.1f}%)\n"
-                f"Only 1 color-change point (L3) will be suggested."
-            )
-            self.lbl_status.setText("✅ Ready. High-contrast B&W detected → 2-color mode.")
+        # Trigger the unified update (will auto-detect or follow forced mode)
+        self._update_color_mode_and_z()
+
+        if self.is_halftone_mode:
+            self.lbl_status.setText("\u2705 Ready. Halftone image detected \u2192 4-color mode.")
         else:
-            # Halftone / grayscale image → 4-color mode
-            self.is_halftone_mode = True
-            self.lbl_z1.setVisible(True)
-            self.spin_z1.setVisible(True)
-            self.lbl_z2.setVisible(True)
-            self.spin_z2.setVisible(True)
-            self.lbl_color_mode.setText(
-                f"🎨 4-Color Mode (Halftone detected, midtones: {midtone_pct:.1f}%)"
-            )
-            self.lbl_status.setText("✅ Ready. Halftone image detected → 4-color mode.")
-
-        # Refresh the auto-Z display whenever a new image is loaded
-        if self.chk_auto_z.isChecked():
-            self._refresh_auto_z_display()
+            self.lbl_status.setText("\u2705 Ready. High-contrast B&W detected \u2192 2-color mode.")
 
     def set_active_swatch(self, idx):
         if self.img_filtered_array is None:
