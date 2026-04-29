@@ -98,9 +98,9 @@ QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox {
     color: #cdd6f4;
     border: 1px solid #45475a;
     border-radius: 4px;
-    padding: 4px;
+    padding: 2px 4px;
     font-size: 13px;
-    min-height: 24px;
+    min-height: 26px;
 }
 QCheckBox {
     background-color: transparent;
@@ -545,34 +545,29 @@ class Manga3DApp(QMainWindow):
         self.spin_dim = QDoubleSpinBox()
         self.spin_dim.setRange(50.0, 600.0)
         self.spin_dim.setValue(200.0)
-        self.spin_dim.setFixedHeight(30)
         form_layout.addRow("Max Dim (mm):", self.spin_dim)
 
         self.spin_base = QDoubleSpinBox()
         self.spin_base.setRange(0.5, 10.0)
         self.spin_base.setValue(1.0)
         self.spin_base.setSingleStep(0.1)
-        self.spin_base.setFixedHeight(30)
         form_layout.addRow("Base (mm):", self.spin_base)
 
         self.spin_maxh = QDoubleSpinBox()
         self.spin_maxh.setRange(1.0, 20.0)
         self.spin_maxh.setValue(2.5)
         self.spin_maxh.setSingleStep(0.1)
-        self.spin_maxh.setFixedHeight(30)
         form_layout.addRow("Max Z (mm):", self.spin_maxh)
 
         self.spin_layer_height = QDoubleSpinBox()
         self.spin_layer_height.setRange(0.01, 1.0)
         self.spin_layer_height.setValue(0.20)
         self.spin_layer_height.setSingleStep(0.01)
-        self.spin_layer_height.setFixedHeight(30)
         form_layout.addRow("Printing Layer Height (mm):", self.spin_layer_height)
 
         self.cmb_quality = QComboBox()
         self.cmb_quality.addItems(["Draft (800px)", "Standard (1200px)", "Ultra (1600px)"])
         self.cmb_quality.setCurrentIndex(1) # Default to Standard
-        self.cmb_quality.setFixedHeight(30)
         form_layout.addRow("Mesh Quality:", self.cmb_quality)
 
         self.chk_smart_decimate = QCheckBox("Smart Optimization (Decimate)")
@@ -591,8 +586,6 @@ class Manga3DApp(QMainWindow):
         self.btn_auto_white.clicked.connect(self._apply_auto_white)
         self.btn_auto_white.setEnabled(False)
 
-        self.spin_white_clip.setFixedHeight(30) # Unify height with button
-
         self.white_clip_container = QWidget()
         white_clip_layout = QHBoxLayout(self.white_clip_container)
         white_clip_layout.setSpacing(5)
@@ -604,7 +597,6 @@ class Manga3DApp(QMainWindow):
         self.spin_black_clip = QSpinBox()
         self.spin_black_clip.setRange(0, 127)
         self.spin_black_clip.setValue(15)
-        self.spin_black_clip.setFixedHeight(30)
         self.spin_black_clip.setToolTip("Pixels darker than this value become perfectly flat max height.")
         form_layout.addRow("Black Clip:", self.spin_black_clip)
 
@@ -635,9 +627,9 @@ class Manga3DApp(QMainWindow):
         self.lbl_z1 = QLabel("L1 Z (Light Gray):")
         self.lbl_z2 = QLabel("L2 Z (Dark Gray):")
         self.lbl_z3 = QLabel("L3 Z (Black/Inks):")
-        self.spin_z1 = QDoubleSpinBox(); self.spin_z1.setRange(0.1, 50.0); self.spin_z1.setSingleStep(0.1); self.spin_z1.setFixedHeight(30)
-        self.spin_z2 = QDoubleSpinBox(); self.spin_z2.setRange(0.1, 50.0); self.spin_z2.setSingleStep(0.1); self.spin_z2.setFixedHeight(30)
-        self.spin_z3 = QDoubleSpinBox(); self.spin_z3.setRange(0.1, 50.0); self.spin_z3.setSingleStep(0.1); self.spin_z3.setFixedHeight(30)
+        self.spin_z1 = QDoubleSpinBox(); self.spin_z1.setRange(0.1, 50.0); self.spin_z1.setSingleStep(0.1)
+        self.spin_z2 = QDoubleSpinBox(); self.spin_z2.setRange(0.1, 50.0); self.spin_z2.setSingleStep(0.1)
+        self.spin_z3 = QDoubleSpinBox(); self.spin_z3.setRange(0.1, 50.0); self.spin_z3.setSingleStep(0.1)
         z_layout.addRow(self.lbl_z1, self.spin_z1)
         z_layout.addRow(self.lbl_z2, self.spin_z2)
         z_layout.addRow(self.lbl_z3, self.spin_z3)
@@ -823,6 +815,9 @@ class Manga3DApp(QMainWindow):
         
         self.viewer.setImage(self.img_filtered_array)
         self.btn_generate.setEnabled(True)
+
+        if self.img_filtered_array is None:
+            return
 
         # --- Auto-Color Depth Analysis ---
         total_pixels = self.img_filtered_array.size
