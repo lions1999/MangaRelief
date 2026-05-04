@@ -265,11 +265,13 @@ class MeshWorker(QThread):
                     except Exception as e:
                         print(f"Warning: Hole filling failed - {e}")
             
-            self.progress.emit(96, "Esportazione STL...")
-            mesh.export(self.output_path)
+            if self.output_path:
+                self.progress.emit(96, "Esportazione STL...")
+                mesh.export(self.output_path)
 
-            self.progress.emit(98, "Esportazione 3MF...")
-            export_3mf(mesh, self.output_path_3mf, self.color_changes_z)
+            if self.output_path_3mf:
+                self.progress.emit(98, "Esportazione 3MF...")
+                export_3mf(mesh, self.output_path_3mf, self.color_changes_z)
 
             self.progress.emit(100, "Esportazione completata!")
             self.finished_ok.emit(self.output_path, self.output_path_3mf)

@@ -248,7 +248,16 @@ class MainWindowUI(QMainWindow):
         right_layout.addStretch()
 
         # BOTTOM CONTROLS
-        self.btn_generate = QPushButton("🚀 Generate STL + 3MF")
+        export_layout = QHBoxLayout()
+        self.chk_export_3mf = QCheckBox("Export .3MF")
+        self.chk_export_3mf.setChecked(True)
+        self.chk_export_stl = QCheckBox("Export .STL")
+        self.chk_export_stl.setChecked(False)
+        export_layout.addWidget(self.chk_export_3mf)
+        export_layout.addWidget(self.chk_export_stl)
+        right_layout.addLayout(export_layout)
+
+        self.btn_generate = QPushButton("🚀 Generate 3D Models")
         self.btn_generate.setFixedHeight(50)
         self.btn_generate.setEnabled(False)
         right_layout.addWidget(self.btn_generate)
