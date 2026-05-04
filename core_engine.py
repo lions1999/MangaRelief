@@ -120,7 +120,7 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, l1_tol=15, l2_tol=15):
+                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, color_mode=4):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -135,8 +135,7 @@ class MeshWorker(QThread):
         self.smart_decimate = smart_decimate
         self.white_clip = white_clip
         self.black_clip = black_clip
-        self.l1_tol = l1_tol
-        self.l2_tol = l2_tol
+        self.color_mode = color_mode
 
     def run(self):
         import gc
@@ -162,13 +161,24 @@ class MeshWorker(QThread):
             img_filtered[img_filtered >= self.white_clip] = 255
             img_filtered[img_filtered <= self.black_clip] = 0
             
-            # Applico i midtones dinamicamente usando sampled_values e le tolleranze dalla UI
-            # L1 (Light Gray) = index 1, L2 (Dark Gray) = index 2
-            l1_target = self.sampled_values[1]
-            l2_target = self.sampled_values[2]
+            # Applico i midtones dinamicamente
+            mid_mask = (img_filtered < self.white_clip) & (img_filtered > self.black_clip)
             
-            img_filtered[(img_filtered >= max(0, l1_target - self.l1_tol)) & (img_filtered <= min(255, l1_target + self.l1_tol))] = l1_target
-            img_filtered[(img_filtered >= max(0, l2_target - self.l2_tol)) & (img_filtered <= min(255, l2_target + self.l2_tol))] = l2_target
+            if self.color_mode == 3:
+                # 3 Colori (1 Midtone attivo, L1)
+                l1_target = self.sampled_values[1]
+                img_filtered[mid_mask] = l1_target
+            elif self.color_mode == 4:
+                # 4 Colori (2 Midtone attivi, L1 e L2)
+                l1_target = self.sampled_values[1]
+                l2_target = self.sampled_values[2]
+                midpoint = (l2_target + l1_target) / 2
+                
+                l2_mask = mid_mask & (img_filtered < midpoint)
+                l1_mask = mid_mask & (img_filtered >= midpoint)
+                
+                img_filtered[l2_mask] = l2_target
+                img_filtered[l1_mask] = l1_target
                 
             self.progress.emit(25, "Generazione Vertici...")
             

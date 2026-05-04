@@ -164,7 +164,7 @@ class MainWindowUI(QMainWindow):
 
         self.spin_maxh = QDoubleSpinBox()
         self.spin_maxh.setRange(1.0, 20.0)
-        self.spin_maxh.setValue(2.5)
+        self.spin_maxh.setValue(2.40)
         self.spin_maxh.setSingleStep(0.1)
         form_layout.addRow("Max Z (mm):", self.spin_maxh)
 
@@ -200,20 +200,6 @@ class MainWindowUI(QMainWindow):
         white_clip_layout.addWidget(self.spin_white_clip)
         white_clip_layout.addWidget(self.btn_auto_white)
         form_layout.addRow("White Clip:", self.white_clip_container)
-
-        self.lbl_l1_tol = QLabel("L1 Snap Tolerance:")
-        self.spin_l1_tol = QSpinBox()
-        self.spin_l1_tol.setRange(0, 50)
-        self.spin_l1_tol.setValue(15)
-        self.spin_l1_tol.setToolTip("Tolerance window around L1 color. Pixels within this range become flat L1.")
-        form_layout.addRow(self.lbl_l1_tol, self.spin_l1_tol)
-
-        self.lbl_l2_tol = QLabel("L2 Snap Tolerance:")
-        self.spin_l2_tol = QSpinBox()
-        self.spin_l2_tol.setRange(0, 50)
-        self.spin_l2_tol.setValue(15)
-        self.spin_l2_tol.setToolTip("Tolerance window around L2 color. Pixels within this range become flat L2.")
-        form_layout.addRow(self.lbl_l2_tol, self.spin_l2_tol)
 
         self.spin_black_clip = QSpinBox()
         self.spin_black_clip.setRange(0, 127)
