@@ -154,36 +154,36 @@ class MeshWorker(QThread):
             
             img_filtered = img
             
-            self.progress.emit(20, "Applying Smart Pixel Snapping (Clipping)...")
-            img_filtered = img_filtered.copy()
+            self.progress.emit(20, "Applying Piecewise Interpolation (Z Mapping)...")
             
-            # Applica White e Black clip assoluti
-            img_filtered[img_filtered >= self.white_clip] = 255
-            img_filtered[img_filtered <= self.black_clip] = 0
+            L1_Z = self.color_changes_z[0]
+            L2_Z = self.color_changes_z[1]
             
-            # Applico i midtones dinamicamente
-            mid_mask = (img_filtered < self.white_clip) & (img_filtered > self.black_clip)
+            l1_target = self.sampled_values[1]
+            l2_target = self.sampled_values[2]
             
-            if self.color_mode == 3:
-                # 3 Colori (1 Midtone attivo, L1)
-                l1_target = self.sampled_values[1]
-                img_filtered[mid_mask] = l1_target
-            elif self.color_mode == 4:
-                # 4 Colori (2 Midtone attivi, L1 e L2)
-                l1_target = self.sampled_values[1]
-                l2_target = self.sampled_values[2]
-                midpoint = (l2_target + l1_target) / 2
-                
-                l2_mask = mid_mask & (img_filtered < midpoint)
-                l1_mask = mid_mask & (img_filtered >= midpoint)
-                
-                img_filtered[l2_mask] = l2_target
-                img_filtered[l1_mask] = l1_target
-                
-            self.progress.emit(25, "Generazione Vertici...")
+            if self.color_mode == 4:
+                midpoint = (l2_target + l1_target) / 2.0
+                x_points = [0, self.black_clip, midpoint, self.white_clip - 1, self.white_clip, 255]
+                y_points = [self.max_h, self.max_h, L2_Z, L1_Z, self.base_h, self.base_h]
+            elif self.color_mode == 3:
+                x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
+                y_points = [self.max_h, self.max_h, L1_Z, self.base_h, self.base_h]
+            else: # 2 Colori
+                x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
+                y_points = [self.max_h, self.max_h, self.max_h, self.base_h, self.base_h]
             
-            relief_height = self.max_h - self.base_h
-            Z = self.base_h + ((255.0 - img_filtered) / 255.0) * relief_height
+            # Evitiamo valori non ordinati (es. se white_clip = 0 o simili configurazioni estreme)
+            x_points = np.array(x_points, dtype=np.float64)
+            y_points = np.array(y_points, dtype=np.float64)
+            sort_idx = np.argsort(x_points)
+            x_points = x_points[sort_idx]
+            y_points = y_points[sort_idx]
+            
+            self.progress.emit(25, "Generazione Vertici (Z-Mapping)...")
+            
+            Z_flat = np.interp(img_filtered.flatten(), x_points, y_points)
+            Z = Z_flat.reshape(img_filtered.shape)
             
             self.progress.emit(40, "Generazione Vertici (MeshGrid)...")
             h, w = img_filtered.shape
