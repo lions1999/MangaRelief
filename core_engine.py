@@ -93,7 +93,7 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, l1_clip=170, l2_clip=85):
+                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, l1_tol=15, l2_tol=15):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -108,8 +108,8 @@ class MeshWorker(QThread):
         self.smart_decimate = smart_decimate
         self.white_clip = white_clip
         self.black_clip = black_clip
-        self.l1_clip = l1_clip
-        self.l2_clip = l2_clip
+        self.l1_tol = l1_tol
+        self.l2_tol = l2_tol
 
     def run(self):
         import gc
@@ -130,13 +130,18 @@ class MeshWorker(QThread):
             
             self.progress.emit(20, "Applying Smart Pixel Snapping (Clipping)...")
             img_filtered = img_filtered.copy()
+            
+            # Applica White e Black clip assoluti
             img_filtered[img_filtered >= self.white_clip] = 255
             img_filtered[img_filtered <= self.black_clip] = 0
             
-            # Applico i midtones dinamicamente in base a l1_clip e l2_clip
-            # Usando una tolleranza di +-5 per accorpare i grigi vicini
-            img_filtered[(img_filtered >= max(0, self.l1_clip - 5)) & (img_filtered <= min(255, self.l1_clip + 5))] = self.l1_clip
-            img_filtered[(img_filtered >= max(0, self.l2_clip - 5)) & (img_filtered <= min(255, self.l2_clip + 5))] = self.l2_clip
+            # Applico i midtones dinamicamente usando sampled_values e le tolleranze dalla UI
+            # L1 (Light Gray) = index 1, L2 (Dark Gray) = index 2
+            l1_target = self.sampled_values[1]
+            l2_target = self.sampled_values[2]
+            
+            img_filtered[(img_filtered >= max(0, l1_target - self.l1_tol)) & (img_filtered <= min(255, l1_target + self.l1_tol))] = l1_target
+            img_filtered[(img_filtered >= max(0, l2_target - self.l2_tol)) & (img_filtered <= min(255, l2_target + self.l2_tol))] = l2_target
                 
             self.progress.emit(25, "Generazione Vertici...")
             

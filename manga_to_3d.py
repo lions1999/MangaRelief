@@ -101,11 +101,11 @@ class Manga3DAppController(MainWindowUI):
         self.spin_z2.setVisible(self.color_mode_state >= 3)
         
         # Update visibility for Clipping controls
-        self.lbl_l1_clip.setVisible(self.color_mode_state == 4)
-        self.spin_l1_clip.setVisible(self.color_mode_state == 4)
+        self.lbl_l1_tol.setVisible(self.color_mode_state == 4)
+        self.spin_l1_tol.setVisible(self.color_mode_state == 4)
         
-        self.lbl_l2_clip.setVisible(self.color_mode_state >= 3)
-        self.spin_l2_clip.setVisible(self.color_mode_state >= 3)
+        self.lbl_l2_tol.setVisible(self.color_mode_state >= 3)
+        self.spin_l2_tol.setVisible(self.color_mode_state >= 3)
 
         # Recalculate Z based on new mode
         if self.chk_auto_z.isChecked():
@@ -357,8 +357,8 @@ class Manga3DAppController(MainWindowUI):
             smart_decimate=self.chk_smart_decimate.isChecked(),
             white_clip=self.spin_white_clip.value(),
             black_clip=self.spin_black_clip.value(),
-            l1_clip=self.spin_l1_clip.value(),
-            l2_clip=self.spin_l2_clip.value()
+            l1_tol=self.spin_l1_tol.value(),
+            l2_tol=self.spin_l2_tol.value()
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
