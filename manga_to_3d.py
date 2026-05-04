@@ -311,21 +311,36 @@ class Manga3DAppController(MainWindowUI):
         if self.img_filtered_array is None or getattr(self, 'loaded_image_path', None) is None:
             return
 
+        export_3mf = self.chk_export_3mf.isChecked()
+        export_stl = self.chk_export_stl.isChecked()
+        
+        if not export_3mf and not export_stl:
+            QMessageBox.warning(self, "Export Error", "Please select at least one export format.")
+            return
+
         # --- Auto-compute output paths (no user prompt) ---
         base_dir = os.path.dirname(self.loaded_image_path)
-        output_dir = os.path.join(base_dir, "output")
-        os.makedirs(output_dir, exist_ok=True)
-
         base_name = os.path.splitext(os.path.basename(self.loaded_image_path))[0]
-        save_path_stl = os.path.join(output_dir, f"{base_name}_3D.stl")
-        save_path_3mf = os.path.join(output_dir, f"{base_name}_3D.3mf")
+        
+        save_path_stl = None
+        if export_stl:
+            output_dir_stl = os.path.join(base_dir, "output", "stl")
+            os.makedirs(output_dir_stl, exist_ok=True)
+            save_path_stl = os.path.join(output_dir_stl, f"{base_name}_3D.stl")
+            counter = 1
+            while os.path.exists(save_path_stl):
+                save_path_stl = os.path.join(output_dir_stl, f"{base_name}_3D_{counter}.stl")
+                counter += 1
 
-        # Anti-overwrite: append progressive counter to BOTH files simultaneously
-        counter = 1
-        while os.path.exists(save_path_stl) or os.path.exists(save_path_3mf):
-            save_path_stl = os.path.join(output_dir, f"{base_name}_3D_{counter}.stl")
-            save_path_3mf = os.path.join(output_dir, f"{base_name}_3D_{counter}.3mf")
-            counter += 1
+        save_path_3mf = None
+        if export_3mf:
+            output_dir_3mf = os.path.join(base_dir, "output", "3mf")
+            os.makedirs(output_dir_3mf, exist_ok=True)
+            save_path_3mf = os.path.join(output_dir_3mf, f"{base_name}_3D.3mf")
+            counter = 1
+            while os.path.exists(save_path_3mf):
+                save_path_3mf = os.path.join(output_dir_3mf, f"{base_name}_3D_{counter}.3mf")
+                counter += 1
 
         # --- Compute or read color-change Z heights ---
         base_h = self.spin_base.value()
@@ -426,23 +441,32 @@ class Manga3DAppController(MainWindowUI):
                 f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 2)\n"
             )
 
-        QMessageBox.information(
-            self, "Export Successful",
-            f"Files saved:\n"
-            f"📄 STL → {stl_path}\n"
-            f"🎨 3MF → {path_3mf}\n\n"
-            f"⏱️ Time elapsed: {time_str}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🎨  BAMBU STUDIO — Color Changes\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"After slicing, add these layer pauses\n"
-            f"via the colored bar on the right side:\n\n"
-            f"{color_lines}\n"
+        msg = "Files saved:\n"
+        if stl_path:
+            msg += f"📄 STL → {stl_path}\n"
+        if path_3mf:
+            msg += f"🎨 3MF → {path_3mf}\n"
+            
+        msg += f"\n⏱️ Time elapsed: {time_str}\n\n"
+        
+        if path_3mf:
+            msg += (
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎨  BAMBU STUDIO — Color Changes\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"After slicing, add these layer pauses\n"
+                f"via the colored bar on the right side:\n\n"
+                f"{color_lines}\n"
+            )
+            
+        msg += (
             f"💡 PRO TIP: For high-detail manga panels,\n"
             f"set Wall Generator to Arachne in Bambu Studio.\n"
             f"This prevents fine lines and small details\n"
             f"from disappearing during slicing!"
         )
+
+        QMessageBox.information(self, "Export Successful", msg)
 
     def on_generate_error(self, err_msg):
         self.unlock_ui()
