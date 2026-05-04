@@ -192,28 +192,31 @@ class MeshWorker(QThread):
             mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
             trimesh.repair.fix_normals(mesh)
             
-            if self.smart_decimate and len(mesh.faces) > 1_500_000:
-                target_faces = 900_000
-                self.progress.emit(92, f"Optimizing mesh geometry (Decimating {len(mesh.faces):,} → {target_faces:,} faces)...")
+            if self.smart_decimate and len(mesh.faces) > 200_000:
+                # Calcolo del target: partiamo da 100k e aggiungiamo un buffer basato sulla dimensione originale,
+                # ma non superiamo mai i 150k triangoli per mantenere il file .3mf leggerissimo.
+                base_target = 100_000
+                extra = min(50_000, int((len(mesh.faces) - 200_000) * 0.05))
+                target_faces = base_target + extra
+                
+                self.progress.emit(92, f"Brutal Decimation ({len(mesh.faces):,} → {target_faces:,} faces)...")
                 verts_out, faces_out = fast_simplification.simplify(
                     mesh.vertices.astype(np.float64),
                     mesh.faces.astype(np.int64),
                     target_count=target_faces,
-                    agg=5.0
+                    agg=6.0  # Maggiore aggressività per collassare più facce piatte
                 )
                 mesh = trimesh.Trimesh(vertices=verts_out, faces=faces_out, process=False)
                 trimesh.repair.fix_normals(mesh)
-            elif self.smart_decimate and len(mesh.faces) > 500_000:
-                target_faces = int(len(mesh.faces) * 0.6)
-                self.progress.emit(92, f"Optimizing mesh geometry (Decimating {len(mesh.faces):,} → {target_faces:,} faces)...")
-                verts_out, faces_out = fast_simplification.simplify(
-                    mesh.vertices.astype(np.float64),
-                    mesh.faces.astype(np.int64),
-                    target_count=target_faces,
-                    agg=5.0
-                )
-                mesh = trimesh.Trimesh(vertices=verts_out, faces=faces_out, process=False)
-                trimesh.repair.fix_normals(mesh)
+                
+                # Safety check: Assicuriamoci che la mesh sia ancora chiusa (watertight)
+                if not mesh.is_watertight:
+                    self.progress.emit(94, "Repairing decimated mesh (filling holes)...")
+                    try:
+                        trimesh.repair.fill_holes(mesh)
+                        trimesh.repair.fix_normals(mesh)
+                    except Exception as e:
+                        print(f"Warning: Hole filling failed - {e}")
             
             self.progress.emit(96, "Esportazione STL...")
             mesh.export(self.output_path)
