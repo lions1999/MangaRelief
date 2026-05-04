@@ -197,6 +197,20 @@ class MainWindowUI(QMainWindow):
         white_clip_layout.addWidget(self.btn_auto_white)
         form_layout.addRow("White Clip:", self.white_clip_container)
 
+        self.lbl_l1_snap = QLabel("L1 Midtone Snap:")
+        self.spin_l1_snap = QSpinBox()
+        self.spin_l1_snap.setRange(100, 200)
+        self.spin_l1_snap.setValue(170)
+        self.spin_l1_snap.setToolTip("Pixels around this value snap to L1 (Light Gray).")
+        form_layout.addRow(self.lbl_l1_snap, self.spin_l1_snap)
+
+        self.lbl_l2_snap = QLabel("L2 Midtone Snap:")
+        self.spin_l2_snap = QSpinBox()
+        self.spin_l2_snap.setRange(50, 150)
+        self.spin_l2_snap.setValue(85)
+        self.spin_l2_snap.setToolTip("Pixels around this value snap to L2 (Dark Gray).")
+        form_layout.addRow(self.lbl_l2_snap, self.spin_l2_snap)
+
         self.spin_black_clip = QSpinBox()
         self.spin_black_clip.setRange(0, 127)
         self.spin_black_clip.setValue(15)

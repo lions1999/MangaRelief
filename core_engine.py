@@ -93,7 +93,7 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15):
+                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, l1_snap=170, l2_snap=85):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -108,6 +108,8 @@ class MeshWorker(QThread):
         self.smart_decimate = smart_decimate
         self.white_clip = white_clip
         self.black_clip = black_clip
+        self.l1_snap = l1_snap
+        self.l2_snap = l2_snap
 
     def run(self):
         import gc
@@ -130,8 +132,11 @@ class MeshWorker(QThread):
             img_filtered = img_filtered.copy()
             img_filtered[img_filtered >= self.white_clip] = 255
             img_filtered[img_filtered <= self.black_clip] = 0
-            img_filtered[(img_filtered >= 165) & (img_filtered <= 175)] = 170
-            img_filtered[(img_filtered >= 80) & (img_filtered <= 90)] = 85
+            
+            # Use dynamic snap values for intermediate halftones
+            # We snap within a +/- 5 range of the target snap value
+            img_filtered[(img_filtered >= self.l1_snap - 5) & (img_filtered <= self.l1_snap + 5)] = self.l1_snap
+            img_filtered[(img_filtered >= self.l2_snap - 5) & (img_filtered <= self.l2_snap + 5)] = self.l2_snap
                 
             self.progress.emit(25, "Generazione Vertici...")
             
