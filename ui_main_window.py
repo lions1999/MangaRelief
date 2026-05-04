@@ -122,6 +122,10 @@ class MainWindowUI(QMainWindow):
         group_swatch = QGroupBox("Color Picking (Click to calibrate)")
         swatch_layout = QVBoxLayout()
         
+        self.chk_auto_midtones = QCheckBox("Auto-Detect Midtones (K-Means)")
+        self.chk_auto_midtones.setChecked(True)
+        swatch_layout.addWidget(self.chk_auto_midtones)
+        
         self.lbl_swatch_info = QLabel("Choose a layer below and click on the image.")
         self.lbl_swatch_info.setWordWrap(True)
         swatch_layout.addWidget(self.lbl_swatch_info)

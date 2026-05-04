@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from utils import resource_path
 from ui_main_window import MainWindowUI
-from core_engine import MeshWorker
+from core_engine import MeshWorker, suggest_midtones
 
 # Abilitiamo i plugin HEIF e AVIF in caso di fallimento OpenCV
 try:
@@ -58,6 +58,7 @@ class Manga3DAppController(MainWindowUI):
         self.btn_auto_white.clicked.connect(self._apply_auto_white)
         self.slider_threshold.valueChanged.connect(self._on_threshold_changed)
         self.chk_auto_z.toggled.connect(self._on_auto_z_toggled)
+        self.chk_auto_midtones.toggled.connect(self._on_auto_midtones_toggled)
         
         self.spin_base.valueChanged.connect(self._on_physical_param_changed)
         self.spin_maxh.valueChanged.connect(self._on_physical_param_changed)
@@ -165,6 +166,17 @@ class Manga3DAppController(MainWindowUI):
         if checked:
             self._refresh_auto_z_display()
 
+    def _on_auto_midtones_toggled(self, checked):
+        """Enable/disable manual color picking depending on the Auto-Detect checkbox state."""
+        for btn in self.swatches:
+            btn.setEnabled(not checked)
+        if checked and self.img_filtered_array is not None:
+            # If re-enabled, calculate right away
+            l1, l2 = suggest_midtones(self.img_filtered_array)
+            self.sampled_colors[1] = l1
+            self.sampled_colors[2] = l2
+            self.update_swatch_colors()
+
     def load_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open Image File",
@@ -230,6 +242,19 @@ class Manga3DAppController(MainWindowUI):
         self.auto_white_suggestion = int(np.clip(suggested_white, 180, 250))
         self.btn_auto_white.setText(f"\ud83e\ude84 {self.auto_white_suggestion}")
         self.btn_auto_white.setEnabled(True)
+
+        # K-Means Auto-Detect Midtones
+        if self.chk_auto_midtones.isChecked():
+            self.lbl_status.setText("🤖 Analyzing midtones (K-Means)...")
+            QApplication.processEvents()
+            l1, l2 = suggest_midtones(self.img_filtered_array)
+            self.sampled_colors[1] = l1
+            self.sampled_colors[2] = l2
+            self.update_swatch_colors()
+            
+            # Disable swatches because Auto is active
+            for btn in self.swatches:
+                btn.setEnabled(False)
 
         # Trigger real-time UI update based on new midtone percentage
         self._refresh_color_mode()

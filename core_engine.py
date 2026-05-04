@@ -84,6 +84,33 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
     with open(output_path_3mf, 'wb') as f:
         f.write(dst_buf.read())
 
+def suggest_midtones(image):
+    """
+    Uses K-Means clustering (K=4) to find the 4 dominant grayscale values in the image.
+    Sorts them from darkest to lightest. Discards the darkest (Black) and lightest (White/BG).
+    Returns the two intermediate values (L1, L2).
+    """
+    # Downsample image for faster k-means
+    small_img = cv2.resize(image, (256, 256))
+    data = np.float32(small_img.flatten())
+    
+    # Define criteria and apply kmeans
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+    K = 4
+    _, _, centers = cv2.kmeans(data, K, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+    
+    # Sort centers from darkest to lightest
+    centers = np.sort(centers.flatten())
+    
+    # centers[0] is Black (L3)
+    # centers[1] is Dark Gray (L2)
+    # centers[2] is Light Gray (L1)
+    # centers[3] is White (L0)
+    l2_val = int(centers[1])
+    l1_val = int(centers[2])
+    
+    return l1_val, l2_val
+
 # ---------------------------------------------------------------------------
 # BACKGROUND MESH WORKER
 # ---------------------------------------------------------------------------
