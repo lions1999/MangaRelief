@@ -93,19 +93,19 @@ class Manga3DAppController(MainWindowUI):
             self.color_mode_state = 2
             self.lbl_color_mode.setText("⚫ 2-Color Mode (B&W)\nL1/L2 hidden. L3 low and thick.")
 
-        # Update visibility for Z heights
+        # Update visibility for Z Heights
         self.lbl_z1.setVisible(self.color_mode_state == 4)
         self.spin_z1.setVisible(self.color_mode_state == 4)
         
         self.lbl_z2.setVisible(self.color_mode_state >= 3)
         self.spin_z2.setVisible(self.color_mode_state >= 3)
-
-        # Update visibility for Snap controls
-        self.lbl_l1_snap.setVisible(self.color_mode_state == 4)
-        self.spin_l1_snap.setVisible(self.color_mode_state == 4)
         
-        self.lbl_l2_snap.setVisible(self.color_mode_state >= 3)
-        self.spin_l2_snap.setVisible(self.color_mode_state >= 3)
+        # Update visibility for Clipping controls
+        self.lbl_l1_clip.setVisible(self.color_mode_state == 4)
+        self.spin_l1_clip.setVisible(self.color_mode_state == 4)
+        
+        self.lbl_l2_clip.setVisible(self.color_mode_state >= 3)
+        self.spin_l2_clip.setVisible(self.color_mode_state >= 3)
 
         # Recalculate Z based on new mode
         if self.chk_auto_z.isChecked():
@@ -357,8 +357,8 @@ class Manga3DAppController(MainWindowUI):
             smart_decimate=self.chk_smart_decimate.isChecked(),
             white_clip=self.spin_white_clip.value(),
             black_clip=self.spin_black_clip.value(),
-            l1_snap=self.spin_l1_snap.value(),
-            l2_snap=self.spin_l2_snap.value()
+            l1_clip=self.spin_l1_clip.value(),
+            l2_clip=self.spin_l2_clip.value()
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
