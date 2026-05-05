@@ -266,10 +266,19 @@ class MeshWorker(QThread):
                     except Exception as e:
                         print(f"Warning: Hole filling failed - {e}")
             
-            self.progress.emit(95, "Mathematical flattening of the base plane...")
+            self.progress.emit(95, "Mathematical flattening and absolute Z clamping...")
             verts = mesh.vertices.copy()
+            
+            # 1. Forza la base piatta
             bottom_mask = verts[:, 2] < 0.05
             verts[bottom_mask, 2] = 0.0
+            
+            # 2. Ghigliottina matematica (Clamping assoluto) per rimuovere eventuali 'overshoot' da decimazione o smoothing
+            verts[:, 2] = np.clip(verts[:, 2], 0.0, self.max_h)
+            
+            # 3. Quantizzazione finale (Tronca decimali superflui per evitare layer fantasma nello slicer)
+            verts[:, 2] = np.round(verts[:, 2], 3)
+            
             mesh.vertices = verts
             trimesh.repair.fix_normals(mesh)
             
