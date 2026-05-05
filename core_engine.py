@@ -9,89 +9,77 @@ import fast_simplification
 from PyQt6.QtCore import QThread, pyqtSignal
 
 # ---------------------------------------------------------------------------
+# .3MF EXPORT  —  Hybrid: Trimesh geometry + Bambu Studio metadata injection
+# ---------------------------------------------------------------------------
+
+_SLICE_INFO = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <header>
+    <header_item key="X-BBL-Client-Type" value="slicer"/>
+    <header_item key="X-BBL-Client-Version" value="02.06.00.51"/>
+  </header>
+</config>"""
+
+_CUSTOM_GCODE_TPL = """\
+<?xml version="1.0" encoding="utf-8"?>
+<custom_gcodes_per_layer>
+<plate>
+<plate_info id="1"/>
+{layer_nodes}<mode value="MultiAsSingle"/>
+</plate>
+</custom_gcodes_per_layer>"""
+
+_CT_EXTRA = """\
+  <Default Extension="config" ContentType="text/xml"/>
+  <Default Extension="xml" ContentType="text/xml"/>
+"""
+
 def export_3mf(mesh, output_path_3mf, color_changes_z):
     """
-    Text-based XML injection for bulletproof native Bambu Studio 3MF generation.
-    Bypasses Trimesh completely for 3MF structure to preserve template integrity.
+    Exports a 3MF using trimesh, then injects Bambu Studio specific XMLs 
+    for color changing at specific Z heights.
     """
-    import re
-    TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "template", "template.3mf")
-    
-    if not os.path.exists(TEMPLATE_PATH):
-        raise FileNotFoundError(f"Template 3MF non trovato in: {TEMPLATE_PATH}")
+    # 1. Generate base 3MF with trimesh in memory
+    src_buf = io.BytesIO()
+    mesh.export(src_buf, file_type='3mf')
+    src_buf.seek(0)
 
-    # 1. Preparazione Dati Mesh
-    verts = mesh.vertices
-    faces = mesh.faces
-    
-    v_strings = [f'<vertex x="{v[0]:.4f}" y="{v[1]:.4f}" z="{v[2]:.4f}"/>' for v in verts]
-    vertices_xml = "\n".join(v_strings)
-    
-    t_strings = [f'<triangle v1="{f[0]}" v2="{f[1]}" v3="{f[2]}"/>' for f in faces]
-    triangles_xml = "\n".join(t_strings)
+    # 2. Build custom_gcode_per_layer.xml layer nodes
+    slot_colors = ["#C8C8C8", "#646464", "#000000", "#1a1a1a"]
+    layer_nodes = ""
+    for i, z in enumerate(sorted(color_changes_z)):
+        extruder = i + 2
+        color    = slot_colors[i] if i < len(slot_colors) else "#000000"
+        layer_nodes += (
+            f'<layer top_z="{round(z, 4)}" type="2" extruder="{extruder}" '
+            f'color="{color}" extra="" gcode="tool_change"/>\n'
+        )
+    custom_gcode = _CUSTOM_GCODE_TPL.format(layer_nodes=layer_nodes)
 
-    # 4. Iniezione Metadati Colori (preparazione stringa)
-    z1, z2, z3 = sorted(color_changes_z)
-    ranges = []
-    ranges.append(f'      <range min_z="0.0" max_z="{z1:.3f}"><option opt_key="extruder">0</option></range>')
-    ranges.append(f'      <range min_z="{z1:.3f}" max_z="{z2:.3f}"><option opt_key="extruder">1</option></range>')
-    ranges.append(f'      <range min_z="{z2:.3f}" max_z="{z3:.3f}"><option opt_key="extruder">2</option></range>')
-    ranges.append(f'      <range min_z="{z3:.3f}" max_z="99.000"><option opt_key="extruder">3</option></range>')
-
-    xml_content = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<config xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">\n'
-        '  <objects>\n'
-        '    <object id="1">\n'
-        + "\n".join(ranges) + "\n"
-        '    </object>\n'
-        '  </objects>\n'
-        '</config>'
-    )
-
-    # 2. Ricostruzione Archivi (Compressione ZIP_DEFLATED OBBLIGATORIA)
+    # 3. Rebuild ZIP: copy Trimesh entries, patch [Content_Types].xml, inject metadata
     dst_buf = io.BytesIO()
-    with zipfile.ZipFile(TEMPLATE_PATH, 'r') as zip_in, \
-         zipfile.ZipFile(dst_buf, 'w', compression=zipfile.ZIP_DEFLATED) as zip_out:
+    with zipfile.ZipFile(src_buf, 'r') as src_zip, \
+         zipfile.ZipFile(dst_buf, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
 
-        wrote_ranges = False
-        
-        for item in zip_in.infolist():
-            # Chirurgia Geometrica (Sostituzione Mirata del Cecchino tramite String Slicing infallibile)
-            if item.filename.lower().startswith('3d/objects/') and item.filename.lower().endswith('.model'):
-                xml_content_str = zip_in.read(item.filename).decode('utf-8')
-                
-                v_start = xml_content_str.find('<vertices>')
-                v_end = xml_content_str.find('</vertices>')
-                t_start = xml_content_str.find('<triangles>')
-                t_end = xml_content_str.find('</triangles>')
+        for item in src_zip.infolist():
+            data = src_zip.read(item.filename)
 
-                if v_start != -1 and v_end != -1 and t_start != -1 and t_end != -1:
-                    part1 = xml_content_str[:v_start + 10]
-                    part2 = xml_content_str[v_end:t_start + 11]
-                    part3 = xml_content_str[t_end:]
-                    
-                    nuovo_xml = part1 + '\n' + vertices_xml + '\n' + part2 + '\n' + triangles_xml + '\n' + part3
-                    zip_out.writestr(item, nuovo_xml.encode('utf-8'))
-                else:
-                    zip_out.writestr(item, xml_content_str.encode('utf-8'))
-                
-            elif item.filename == 'Metadata/layer_config_ranges.xml':
-                zip_out.writestr(item, xml_content.encode('utf-8'))
-                wrote_ranges = True
-                
-            # Uccidi TUTTE le Thumbnail
-            elif item.filename.lower().endswith('.png'):
-                continue
-                
-            # Copia Restante Identica
-            else:
-                zip_out.writestr(item, zip_in.read(item.filename))
-                
-        # Assicuriamoci che il file venga iniettato anche se non era nel template
-        if not wrote_ranges:
-            zip_out.writestr('Metadata/layer_config_ranges.xml', xml_content.encode('utf-8'))
+            if item.filename == '[Content_Types].xml':
+                ct_text = data.decode('utf-8')
+                if 'Extension="config"' not in ct_text:
+                    ct_text = ct_text.replace('</Types>', _CT_EXTRA + '</Types>')
+                data = ct_text.encode('utf-8')
 
+            dst_zip.writestr(item, data)
+
+        # Inject Bambu metadata
+        dst_zip.writestr('Metadata/custom_gcode_per_layer.xml',
+                         custom_gcode.encode('utf-8'))
+        dst_zip.writestr('Metadata/slice_info.config',
+                         _SLICE_INFO.encode('utf-8'))
+
+    # 4. Write to disk
     dst_buf.seek(0)
     with open(output_path_3mf, 'wb') as f:
         f.write(dst_buf.read())
