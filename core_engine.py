@@ -12,74 +12,75 @@ from PyQt6.QtCore import QThread, pyqtSignal
 # .3MF EXPORT  —  Hybrid: Trimesh geometry + Bambu Studio metadata injection
 # ---------------------------------------------------------------------------
 
-_SLICE_INFO = """\
-<?xml version="1.0" encoding="UTF-8"?>
-<config>
-  <header>
-    <header_item key="X-BBL-Client-Type" value="slicer"/>
-    <header_item key="X-BBL-Client-Version" value="02.06.00.51"/>
-  </header>
-</config>"""
-
-_CUSTOM_GCODE_TPL = """\
-<?xml version="1.0" encoding="utf-8"?>
-<custom_gcodes_per_layer>
-<plate>
-<plate_info id="1"/>
-{layer_nodes}<mode value="MultiAsSingle"/>
-</plate>
-</custom_gcodes_per_layer>"""
-
-_CT_EXTRA = """\
-  <Default Extension="config" ContentType="text/xml"/>
-  <Default Extension="xml" ContentType="text/xml"/>
-"""
-
 def export_3mf(mesh, output_path_3mf, color_changes_z):
     """
-    Exports a 3MF using trimesh, then injects Bambu Studio specific XMLs 
-    for color changing at specific Z heights.
+    Exports a 3MF by merging the trimesh geometry with a pre-existing 
+    Bambu Studio template, injecting dynamic color ranges.
     """
+    TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "template", "template.3mf")
+    
+    if not os.path.exists(TEMPLATE_PATH):
+        raise FileNotFoundError(f"Template 3MF non trovato in: {TEMPLATE_PATH}")
+
     # 1. Generate base 3MF with trimesh in memory
-    src_buf = io.BytesIO()
-    mesh.export(src_buf, file_type='3mf')
-    src_buf.seek(0)
+    temp_buf = io.BytesIO()
+    mesh.export(temp_buf, file_type='3mf')
+    temp_buf.seek(0)
 
-    # 2. Build custom_gcode_per_layer.xml layer nodes
-    slot_colors = ["#C8C8C8", "#646464", "#000000", "#1a1a1a"]
-    layer_nodes = ""
-    for i, z in enumerate(sorted(color_changes_z)):
-        extruder = i + 2
-        color    = slot_colors[i] if i < len(slot_colors) else "#000000"
-        layer_nodes += (
-            f'<layer top_z="{round(z, 4)}" type="2" extruder="{extruder}" '
-            f'color="{color}" extra="" gcode="tool_change"/>\n'
-        )
-    custom_gcode = _CUSTOM_GCODE_TPL.format(layer_nodes=layer_nodes)
-
-    # 3. Rebuild ZIP: copy Trimesh entries, patch [Content_Types].xml, inject metadata
+    # 2 & 3. Rebuild ZIP: copy from template, override 3D/ from temp_mesh, inject config
     dst_buf = io.BytesIO()
-    with zipfile.ZipFile(src_buf, 'r') as src_zip, \
+    with zipfile.ZipFile(TEMPLATE_PATH, 'r') as tpl_zip, \
+         zipfile.ZipFile(temp_buf, 'r') as temp_zip, \
          zipfile.ZipFile(dst_buf, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
 
-        for item in src_zip.infolist():
-            data = src_zip.read(item.filename)
-
-            if item.filename == '[Content_Types].xml':
-                ct_text = data.decode('utf-8')
-                if 'Extension="config"' not in ct_text:
-                    ct_text = ct_text.replace('</Types>', _CT_EXTRA + '</Types>')
-                data = ct_text.encode('utf-8')
-
+        # Copy from template (ignoring 3D/ and the file we will inject)
+        for item in tpl_zip.infolist():
+            if item.filename.startswith('3D/'):
+                continue
+            if item.filename == 'Metadata/layer_config_ranges.xml':
+                continue
+            data = tpl_zip.read(item.filename)
             dst_zip.writestr(item, data)
 
-        # Inject Bambu metadata
-        dst_zip.writestr('Metadata/custom_gcode_per_layer.xml',
-                         custom_gcode.encode('utf-8'))
-        dst_zip.writestr('Metadata/slice_info.config',
-                         _SLICE_INFO.encode('utf-8'))
+        # Copy 3D/ from generated mesh
+        for item in temp_zip.infolist():
+            if item.filename.startswith('3D/'):
+                data = temp_zip.read(item.filename)
+                
+                # Bambu Studio expects /3D/3dmodel.model or similar. 
+                # Ensure path matches standard naming.
+                if item.filename.lower() == '3d/3dmodel.model':
+                    item.filename = '3D/3dmodel.model'
+                    
+                dst_zip.writestr(item, data)
 
-    # 4. Write to disk
+        # 4. Inject Bambu Metadata (layer_config_ranges.xml)
+        z1, z2, z3 = sorted(color_changes_z)
+        
+        ranges = []
+        # Base/White
+        ranges.append(f'      <range min_z="0.0" max_z="{z1:.3f}"><option opt_key="extruder">0</option></range>')
+        # L1
+        ranges.append(f'      <range min_z="{z1:.3f}" max_z="{z2:.3f}"><option opt_key="extruder">1</option></range>')
+        # L2
+        ranges.append(f'      <range min_z="{z2:.3f}" max_z="{z3:.3f}"><option opt_key="extruder">2</option></range>')
+        # L3/Black
+        ranges.append(f'      <range min_z="{z3:.3f}" max_z="99.000"><option opt_key="extruder">3</option></range>')
+
+        xml_content = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<config xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">\n'
+            '  <objects>\n'
+            '    <object id="1">\n'
+            + "\n".join(ranges) + "\n"
+            '    </object>\n'
+            '  </objects>\n'
+            '</config>'
+        )
+        
+        dst_zip.writestr('Metadata/layer_config_ranges.xml', xml_content.encode('utf-8'))
+
+    # Write to disk
     dst_buf.seek(0)
     with open(output_path_3mf, 'wb') as f:
         f.write(dst_buf.read())
