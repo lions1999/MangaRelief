@@ -14,64 +14,87 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 def export_3mf(mesh, output_path_3mf, color_changes_z):
     """
-    Exports a 3MF by merging the trimesh geometry with a pre-existing 
-    Bambu Studio template, injecting dynamic color ranges.
+    Exports a 3MF by using the trimesh generated 3MF as the base container (to preserve Core Spec OPC relationships),
+    and injecting Bambu Studio specific metadata from a template, patching the correct object ID.
     """
+    import xml.etree.ElementTree as ET
+    
     TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "template", "template.3mf")
     
     if not os.path.exists(TEMPLATE_PATH):
         raise FileNotFoundError(f"Template 3MF non trovato in: {TEMPLATE_PATH}")
 
-    # 1. Generate base 3MF with trimesh in memory
+    # 1. Generazione Base (Core Spec) in memoria
     temp_buf = io.BytesIO()
     mesh.export(temp_buf, file_type='3mf')
     temp_buf.seek(0)
 
-    # 2 & 3. Rebuild ZIP: copy from template, override 3D/ from temp_mesh, inject config
+    # 2. Ricerca dell'Object ID generato da trimesh
+    mesh_id = "1" # Valore di fallback
+    with zipfile.ZipFile(temp_buf, 'r') as temp_zip:
+        for item in temp_zip.infolist():
+            if item.filename.lower() == '3d/3dmodel.model':
+                model_xml = temp_zip.read(item.filename)
+                root = ET.fromstring(model_xml)
+                for child in root.iter():
+                    if child.tag.endswith('item') and 'objectid' in child.attrib:
+                        mesh_id = child.attrib['objectid']
+                        break
+                    elif child.tag.endswith('object') and 'id' in child.attrib:
+                        mesh_id = child.attrib['id']
+                        break
+                break
+
+    # 3. Costruzione del File Finale e Merge Inverso
     dst_buf = io.BytesIO()
-    with zipfile.ZipFile(TEMPLATE_PATH, 'r') as tpl_zip, \
-         zipfile.ZipFile(temp_buf, 'r') as temp_zip, \
+    with zipfile.ZipFile(temp_buf, 'r') as temp_zip, \
+         zipfile.ZipFile(TEMPLATE_PATH, 'r') as tpl_zip, \
          zipfile.ZipFile(dst_buf, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
 
-        # Copy from template (ignoring 3D/ and the file we will inject)
-        for item in tpl_zip.infolist():
-            if item.filename.startswith('3D/'):
-                continue
-            if item.filename == 'Metadata/layer_config_ranges.xml':
-                continue
-            data = tpl_zip.read(item.filename)
-            dst_zip.writestr(item, data)
-
-        # Copy 3D/ from generated mesh
+        # Copia da trimesh come contenitore base, escludendo [Content_Types].xml per pacciarlo
         for item in temp_zip.infolist():
-            if item.filename.startswith('3D/'):
-                data = temp_zip.read(item.filename)
+            if item.filename == '[Content_Types].xml':
+                ct_text = temp_zip.read(item.filename).decode('utf-8')
                 
-                # Bambu Studio expects /3D/3dmodel.model or similar. 
-                # Ensure path matches standard naming.
-                if item.filename.lower() == '3d/3dmodel.model':
-                    item.filename = '3D/3dmodel.model'
-                    
+                additions = []
+                if 'Extension="config"' not in ct_text:
+                    additions.append('<Default ContentType="application/xml" Extension="config"/>')
+                if 'Extension="json"' not in ct_text:
+                    additions.append('<Default ContentType="application/json" Extension="json"/>')
+                
+                if additions:
+                    ct_text = ct_text.replace('</Types>', '\n'.join(additions) + '\n</Types>')
+                
+                dst_zip.writestr(item, ct_text.encode('utf-8'))
+            else:
+                data = temp_zip.read(item.filename)
                 dst_zip.writestr(item, data)
 
-        # 4. Inject Bambu Metadata (layer_config_ranges.xml)
+        # 4. Iniezione Metadati Bambu dal template
+        for item in tpl_zip.infolist():
+            if item.filename.startswith('Metadata/'):
+                if item.filename == 'Metadata/layer_config_ranges.xml':
+                    continue
+                # Evita di sovrascrivere file generati da trimesh, se per caso esistono in Metadata
+                try:
+                    dst_zip.getinfo(item.filename)
+                except KeyError:
+                    dst_zip.writestr(item, tpl_zip.read(item.filename))
+
+        # 5. Generazione Z-Heights Dinamiche e Iniezione Ranges
         z1, z2, z3 = sorted(color_changes_z)
         
         ranges = []
-        # Base/White
         ranges.append(f'      <range min_z="0.0" max_z="{z1:.3f}"><option opt_key="extruder">0</option></range>')
-        # L1
         ranges.append(f'      <range min_z="{z1:.3f}" max_z="{z2:.3f}"><option opt_key="extruder">1</option></range>')
-        # L2
         ranges.append(f'      <range min_z="{z2:.3f}" max_z="{z3:.3f}"><option opt_key="extruder">2</option></range>')
-        # L3/Black
         ranges.append(f'      <range min_z="{z3:.3f}" max_z="99.000"><option opt_key="extruder">3</option></range>')
 
         xml_content = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<config xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">\n'
             '  <objects>\n'
-            '    <object id="1">\n'
+            f'    <object id="{mesh_id}">\n'
             + "\n".join(ranges) + "\n"
             '    </object>\n'
             '  </objects>\n'
@@ -80,7 +103,7 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
         
         dst_zip.writestr('Metadata/layer_config_ranges.xml', xml_content.encode('utf-8'))
 
-    # Write to disk
+    # Salva su disco
     dst_buf.seek(0)
     with open(output_path_3mf, 'wb') as f:
         f.write(dst_buf.read())
