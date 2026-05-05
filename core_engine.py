@@ -183,6 +183,7 @@ class MeshWorker(QThread):
             self.progress.emit(25, "Generazione Vertici (Z-Mapping)...")
             
             Z_flat = np.interp(img_filtered.flatten(), x_points, y_points)
+            Z_flat = np.round(Z_flat, 3)
             Z = Z_flat.reshape(img_filtered.shape)
             
             self.progress.emit(40, "Generazione Vertici (MeshGrid)...")
