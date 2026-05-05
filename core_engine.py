@@ -57,12 +57,24 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
         wrote_ranges = False
         
         for item in zip_in.infolist():
-            # Chirurgia Geometrica (Sostituzione Mirata del Cecchino)
+            # Chirurgia Geometrica (Sostituzione Mirata del Cecchino tramite String Slicing infallibile)
             if item.filename.lower().startswith('3d/objects/') and item.filename.lower().endswith('.model'):
-                testo_xml = zip_in.read(item.filename).decode('utf-8')
-                testo_xml = re.sub(r'<vertices>.*?</vertices>', f'<vertices>\n{vertices_xml}\n</vertices>', testo_xml, flags=re.DOTALL)
-                testo_xml = re.sub(r'<triangles>.*?</triangles>', f'<triangles>\n{triangles_xml}\n</triangles>', testo_xml, flags=re.DOTALL)
-                zip_out.writestr(item, testo_xml.encode('utf-8'))
+                xml_content_str = zip_in.read(item.filename).decode('utf-8')
+                
+                v_start = xml_content_str.find('<vertices>')
+                v_end = xml_content_str.find('</vertices>')
+                t_start = xml_content_str.find('<triangles>')
+                t_end = xml_content_str.find('</triangles>')
+
+                if v_start != -1 and v_end != -1 and t_start != -1 and t_end != -1:
+                    part1 = xml_content_str[:v_start + 10]
+                    part2 = xml_content_str[v_end:t_start + 11]
+                    part3 = xml_content_str[t_end:]
+                    
+                    nuovo_xml = part1 + '\n' + vertices_xml + '\n' + part2 + '\n' + triangles_xml + '\n' + part3
+                    zip_out.writestr(item, nuovo_xml.encode('utf-8'))
+                else:
+                    zip_out.writestr(item, xml_content_str.encode('utf-8'))
                 
             elif item.filename == 'Metadata/layer_config_ranges.xml':
                 zip_out.writestr(item, xml_content.encode('utf-8'))
