@@ -107,35 +107,41 @@ class Manga3DAppController(MainWindowUI):
 
     def _compute_auto_z(self):
         """Return the 3 auto-computed color-change Z heights based on current spinbox values, snapped to layer height."""
-        base_h = self.spin_base.value()
-        max_h  = self.spin_maxh.value()
-        layer_h = self.spin_layer_height.value()
-        relief = max_h - base_h
+        base_z = self.spin_base.value()
+        max_z  = self.spin_maxh.value()
+        layer_height = self.spin_layer_height.value()
+        available_z = max_z - base_z
         
         mode = getattr(self, 'color_mode_state', 4)
 
-        # Calculate theoretical heights
         if mode == 2:
-            z1_theo = 0.0
-            z2_theo = 0.0
-            z3_theo = base_h + (layer_h * 2.0)
+            z1 = 0.0
+            z2 = 0.0
+            z3 = max_z
         elif mode == 3:
-            z1_theo = 0.0
-            z2_theo = base_h + (layer_h * 2.0)
-            z3_theo = base_h + max(layer_h * 4.0, 0.66 * relief)
-        else: # mode == 4
-            z1_theo = base_h + 0.33 * relief
-            z2_theo = base_h + 0.66 * relief
-            z3_theo = base_h + 1.00 * relief
+            z1 = 0.0
+            z3 = max_z
             
-        # Ensure they don't exceed max_h
-        z2_theo = min(z2_theo, max_h)
-        z3_theo = min(z3_theo, max_h)
-        
-        # Snap to nearest multiple of layer height
-        z1 = round(z1_theo / layer_h) * layer_h
-        z2 = round(z2_theo / layer_h) * layer_h
-        z3 = round(z3_theo / layer_h) * layer_h
+            target = base_z + (available_z / 2.0)
+            z2 = round(target / layer_height) * layer_height
+            
+            # Safety Check: assicurati che sia sempre almeno 1 layer sotto il nero
+            if z2 >= max_z:
+                z2 = max_z - layer_height
+        else: # mode == 4
+            z3 = max_z
+            
+            target1 = base_z + (available_z / 3.0)
+            z1 = round(target1 / layer_height) * layer_height
+            
+            target2 = base_z + 2.0 * (available_z / 3.0)
+            z2 = round(target2 / layer_height) * layer_height
+            
+            # Safety Check: assicurati che L1_Z < L2_Z < L3_Z
+            if z2 >= z3:
+                z2 = z3 - layer_height
+            if z1 >= z2:
+                z1 = z2 - layer_height
         
         return [round(z1, 3), round(z2, 3), round(z3, 3)]
 
