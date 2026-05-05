@@ -30,7 +30,21 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
     t_strings = [f'<triangle v1="{f[0]}" v2="{f[1]}" v3="{f[2]}" />' for f in faces]
     triangles_xml = "\n".join(t_strings)
     
-    nuovo_blocco_mesh = f'<mesh>\n<vertices>\n{vertices_xml}\n</vertices>\n<triangles>\n{triangles_xml}\n</triangles>\n</mesh>'
+    object_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/07">
+  <resources>
+    <object id="1" type="model">
+      <mesh>
+        <vertices>
+{vertices_xml}
+        </vertices>
+        <triangles>
+{triangles_xml}
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+</model>"""
 
     # 4. Iniezione Metadati Colori (preparazione stringa)
     z1, z2, z3 = sorted(color_changes_z)
@@ -51,29 +65,27 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
         '</config>'
     )
 
-    # 2. Ricostruzione Archivi
+    # 2. Ricostruzione Archivi (Compressione ZIP_DEFLATED OBBLIGATORIA)
     dst_buf = io.BytesIO()
     with zipfile.ZipFile(TEMPLATE_PATH, 'r') as zip_in, \
-         zipfile.ZipFile(dst_buf, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+         zipfile.ZipFile(dst_buf, 'w', compression=zipfile.ZIP_DEFLATED) as zip_out:
 
         wrote_ranges = False
         
         for item in zip_in.infolist():
-            # Uccidi le Thumbnail per forzare la rigenerazione in Bambu Studio
-            if item.filename.startswith('Metadata/') and item.filename.lower().endswith('.png'):
-                continue
-                
-            # 3. Chirurgia Geometrica (Sostituzione Mesh SOLO nell'oggetto fisico)
+            # Chirurgia Geometrica (Sostituzione completa)
             if item.filename.lower().startswith('3d/objects/') and item.filename.lower().endswith('.model'):
-                testo_xml = zip_in.read(item.filename).decode('utf-8')
-                testo_xml = re.sub(r'<mesh[^>]*>.*?</mesh>', nuovo_blocco_mesh, testo_xml, flags=re.DOTALL)
-                zip_out.writestr(item, testo_xml.encode('utf-8'))
+                zip_out.writestr(item, object_xml.encode('utf-8'))
                 
             elif item.filename == 'Metadata/layer_config_ranges.xml':
                 zip_out.writestr(item, xml_content.encode('utf-8'))
                 wrote_ranges = True
                 
-            # 5. Copia Restante (Preserva 3dmodel.model e _rels identici)
+            # Uccidi TUTTE le Thumbnail
+            elif item.filename.lower().endswith('.png'):
+                continue
+                
+            # Copia Restante Identica
             else:
                 zip_out.writestr(item, zip_in.read(item.filename))
                 
