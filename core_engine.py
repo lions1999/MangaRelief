@@ -24,27 +24,11 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
     verts = mesh.vertices
     faces = mesh.faces
     
-    v_strings = [f'<vertex x="{v[0]:.4f}" y="{v[1]:.4f}" z="{v[2]:.4f}" />' for v in verts]
+    v_strings = [f'<vertex x="{v[0]:.4f}" y="{v[1]:.4f}" z="{v[2]:.4f}"/>' for v in verts]
     vertices_xml = "\n".join(v_strings)
     
-    t_strings = [f'<triangle v1="{f[0]}" v2="{f[1]}" v3="{f[2]}" />' for f in faces]
+    t_strings = [f'<triangle v1="{f[0]}" v2="{f[1]}" v3="{f[2]}"/>' for f in faces]
     triangles_xml = "\n".join(t_strings)
-    
-    object_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/07">
-  <resources>
-    <object id="1" type="model">
-      <mesh>
-        <vertices>
-{vertices_xml}
-        </vertices>
-        <triangles>
-{triangles_xml}
-        </triangles>
-      </mesh>
-    </object>
-  </resources>
-</model>"""
 
     # 4. Iniezione Metadati Colori (preparazione stringa)
     z1, z2, z3 = sorted(color_changes_z)
@@ -73,9 +57,12 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
         wrote_ranges = False
         
         for item in zip_in.infolist():
-            # Chirurgia Geometrica (Sostituzione completa)
+            # Chirurgia Geometrica (Sostituzione Mirata del Cecchino)
             if item.filename.lower().startswith('3d/objects/') and item.filename.lower().endswith('.model'):
-                zip_out.writestr(item, object_xml.encode('utf-8'))
+                testo_xml = zip_in.read(item.filename).decode('utf-8')
+                testo_xml = re.sub(r'<vertices>.*?</vertices>', f'<vertices>\n{vertices_xml}\n</vertices>', testo_xml, flags=re.DOTALL)
+                testo_xml = re.sub(r'<triangles>.*?</triangles>', f'<triangles>\n{triangles_xml}\n</triangles>', testo_xml, flags=re.DOTALL)
+                zip_out.writestr(item, testo_xml.encode('utf-8'))
                 
             elif item.filename == 'Metadata/layer_config_ranges.xml':
                 zip_out.writestr(item, xml_content.encode('utf-8'))
