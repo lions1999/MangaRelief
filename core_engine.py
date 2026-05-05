@@ -266,6 +266,13 @@ class MeshWorker(QThread):
                     except Exception as e:
                         print(f"Warning: Hole filling failed - {e}")
             
+            self.progress.emit(95, "Mathematical flattening of the base plane...")
+            verts = mesh.vertices.copy()
+            bottom_mask = verts[:, 2] < 0.05
+            verts[bottom_mask, 2] = 0.0
+            mesh.vertices = verts
+            trimesh.repair.fix_normals(mesh)
+            
             if self.output_path:
                 self.progress.emit(96, "Esportazione STL...")
                 mesh.export(self.output_path)
