@@ -59,17 +59,21 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
         wrote_ranges = False
         
         for item in zip_in.infolist():
-            # 3. Chirurgia Geometrica (Sostituzione Mesh)
-            if item.filename.lower() == '3d/3dmodel.model' or item.filename.lower() == '3d/objects/object_1.model':
+            # Uccidi le Thumbnail per forzare la rigenerazione in Bambu Studio
+            if item.filename.startswith('Metadata/') and item.filename.lower().endswith('.png'):
+                continue
+                
+            # 3. Chirurgia Geometrica (Sostituzione Mesh SOLO nell'oggetto fisico)
+            if item.filename.lower().startswith('3d/objects/') and item.filename.lower().endswith('.model'):
                 testo_xml = zip_in.read(item.filename).decode('utf-8')
-                testo_xml = re.sub(r'<mesh>.*?</mesh>', nuovo_blocco_mesh, testo_xml, flags=re.DOTALL)
+                testo_xml = re.sub(r'<mesh[^>]*>.*?</mesh>', nuovo_blocco_mesh, testo_xml, flags=re.DOTALL)
                 zip_out.writestr(item, testo_xml.encode('utf-8'))
                 
             elif item.filename == 'Metadata/layer_config_ranges.xml':
                 zip_out.writestr(item, xml_content.encode('utf-8'))
                 wrote_ranges = True
                 
-            # 5. Copia Restante
+            # 5. Copia Restante (Preserva 3dmodel.model e _rels identici)
             else:
                 zip_out.writestr(item, zip_in.read(item.filename))
                 
