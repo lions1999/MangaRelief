@@ -9,101 +9,74 @@ import fast_simplification
 from PyQt6.QtCore import QThread, pyqtSignal
 
 # ---------------------------------------------------------------------------
-# .3MF EXPORT  —  Hybrid: Trimesh geometry + Bambu Studio metadata injection
-# ---------------------------------------------------------------------------
-
 def export_3mf(mesh, output_path_3mf, color_changes_z):
     """
-    Exports a 3MF by using the trimesh generated 3MF as the base container (to preserve Core Spec OPC relationships),
-    and injecting Bambu Studio specific metadata from a template, patching the correct object ID.
+    Text-based XML injection for bulletproof native Bambu Studio 3MF generation.
+    Bypasses Trimesh completely for 3MF structure to preserve template integrity.
     """
-    import xml.etree.ElementTree as ET
-    
+    import re
     TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "template", "template.3mf")
     
     if not os.path.exists(TEMPLATE_PATH):
         raise FileNotFoundError(f"Template 3MF non trovato in: {TEMPLATE_PATH}")
 
-    # 1. Generazione Base (Core Spec) in memoria
-    temp_buf = io.BytesIO()
-    mesh.export(temp_buf, file_type='3mf')
-    temp_buf.seek(0)
+    # 1. Preparazione Dati Mesh
+    verts = mesh.vertices
+    faces = mesh.faces
+    
+    v_strings = [f'<vertex x="{v[0]:.4f}" y="{v[1]:.4f}" z="{v[2]:.4f}" />' for v in verts]
+    vertices_xml = "\n".join(v_strings)
+    
+    t_strings = [f'<triangle v1="{f[0]}" v2="{f[1]}" v3="{f[2]}" />' for f in faces]
+    triangles_xml = "\n".join(t_strings)
+    
+    nuovo_blocco_mesh = f'<mesh>\n<vertices>\n{vertices_xml}\n</vertices>\n<triangles>\n{triangles_xml}\n</triangles>\n</mesh>'
 
-    # 2. Ricerca dell'Object ID generato da trimesh
-    mesh_id = "1" # Valore di fallback
-    with zipfile.ZipFile(temp_buf, 'r') as temp_zip:
-        for item in temp_zip.infolist():
-            if item.filename.lower() == '3d/3dmodel.model':
-                model_xml = temp_zip.read(item.filename)
-                root = ET.fromstring(model_xml)
-                for child in root.iter():
-                    if child.tag.endswith('item') and 'objectid' in child.attrib:
-                        mesh_id = child.attrib['objectid']
-                        break
-                    elif child.tag.endswith('object') and 'id' in child.attrib:
-                        mesh_id = child.attrib['id']
-                        break
-                break
+    # 4. Iniezione Metadati Colori (preparazione stringa)
+    z1, z2, z3 = sorted(color_changes_z)
+    ranges = []
+    ranges.append(f'      <range min_z="0.0" max_z="{z1:.3f}"><option opt_key="extruder">0</option></range>')
+    ranges.append(f'      <range min_z="{z1:.3f}" max_z="{z2:.3f}"><option opt_key="extruder">1</option></range>')
+    ranges.append(f'      <range min_z="{z2:.3f}" max_z="{z3:.3f}"><option opt_key="extruder">2</option></range>')
+    ranges.append(f'      <range min_z="{z3:.3f}" max_z="99.000"><option opt_key="extruder">3</option></range>')
 
-    # 3. Costruzione del File Finale e Merge Inverso
+    xml_content = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<config xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">\n'
+        '  <objects>\n'
+        '    <object id="1">\n'
+        + "\n".join(ranges) + "\n"
+        '    </object>\n'
+        '  </objects>\n'
+        '</config>'
+    )
+
+    # 2. Ricostruzione Archivi
     dst_buf = io.BytesIO()
-    with zipfile.ZipFile(temp_buf, 'r') as temp_zip, \
-         zipfile.ZipFile(TEMPLATE_PATH, 'r') as tpl_zip, \
-         zipfile.ZipFile(dst_buf, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
+    with zipfile.ZipFile(TEMPLATE_PATH, 'r') as zip_in, \
+         zipfile.ZipFile(dst_buf, 'w', zipfile.ZIP_DEFLATED) as zip_out:
 
-        # Copia da trimesh come contenitore base, escludendo [Content_Types].xml per pacciarlo
-        for item in temp_zip.infolist():
-            if item.filename == '[Content_Types].xml':
-                ct_text = temp_zip.read(item.filename).decode('utf-8')
+        wrote_ranges = False
+        
+        for item in zip_in.infolist():
+            # 3. Chirurgia Geometrica (Sostituzione Mesh)
+            if item.filename.lower() == '3d/3dmodel.model' or item.filename.lower() == '3d/objects/object_1.model':
+                testo_xml = zip_in.read(item.filename).decode('utf-8')
+                testo_xml = re.sub(r'<mesh>.*?</mesh>', nuovo_blocco_mesh, testo_xml, flags=re.DOTALL)
+                zip_out.writestr(item, testo_xml.encode('utf-8'))
                 
-                additions = []
-                if 'Extension="config"' not in ct_text:
-                    additions.append('<Default ContentType="application/xml" Extension="config"/>')
-                if 'Extension="json"' not in ct_text:
-                    additions.append('<Default ContentType="application/json" Extension="json"/>')
+            elif item.filename == 'Metadata/layer_config_ranges.xml':
+                zip_out.writestr(item, xml_content.encode('utf-8'))
+                wrote_ranges = True
                 
-                if additions:
-                    ct_text = ct_text.replace('</Types>', '\n'.join(additions) + '\n</Types>')
-                
-                dst_zip.writestr(item, ct_text.encode('utf-8'))
+            # 5. Copia Restante
             else:
-                data = temp_zip.read(item.filename)
-                dst_zip.writestr(item, data)
+                zip_out.writestr(item, zip_in.read(item.filename))
+                
+        # Assicuriamoci che il file venga iniettato anche se non era nel template
+        if not wrote_ranges:
+            zip_out.writestr('Metadata/layer_config_ranges.xml', xml_content.encode('utf-8'))
 
-        # 4. Iniezione Metadati Bambu dal template
-        for item in tpl_zip.infolist():
-            if item.filename.startswith('Metadata/'):
-                if item.filename == 'Metadata/layer_config_ranges.xml':
-                    continue
-                # Evita di sovrascrivere file generati da trimesh, se per caso esistono in Metadata
-                try:
-                    dst_zip.getinfo(item.filename)
-                except KeyError:
-                    dst_zip.writestr(item, tpl_zip.read(item.filename))
-
-        # 5. Generazione Z-Heights Dinamiche e Iniezione Ranges
-        z1, z2, z3 = sorted(color_changes_z)
-        
-        ranges = []
-        ranges.append(f'      <range min_z="0.0" max_z="{z1:.3f}"><option opt_key="extruder">0</option></range>')
-        ranges.append(f'      <range min_z="{z1:.3f}" max_z="{z2:.3f}"><option opt_key="extruder">1</option></range>')
-        ranges.append(f'      <range min_z="{z2:.3f}" max_z="{z3:.3f}"><option opt_key="extruder">2</option></range>')
-        ranges.append(f'      <range min_z="{z3:.3f}" max_z="99.000"><option opt_key="extruder">3</option></range>')
-
-        xml_content = (
-            '<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<config xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">\n'
-            '  <objects>\n'
-            f'    <object id="{mesh_id}">\n'
-            + "\n".join(ranges) + "\n"
-            '    </object>\n'
-            '  </objects>\n'
-            '</config>'
-        )
-        
-        dst_zip.writestr('Metadata/layer_config_ranges.xml', xml_content.encode('utf-8'))
-
-    # Salva su disco
     dst_buf.seek(0)
     with open(output_path_3mf, 'wb') as f:
         f.write(dst_buf.read())
