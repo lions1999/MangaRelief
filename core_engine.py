@@ -158,10 +158,22 @@ class MeshWorker(QThread):
                 new_w, new_h = int(w * scale_res), int(h * scale_res)
                 img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
             
-            self.progress.emit(15, "Applying aggressive thresholding and smoothing...")
-            img = cv2.GaussianBlur(img, (3, 3), 0)
-            img[img > self.white_clip] = 255
-            img[img < self.black_clip] = 0
+            self.progress.emit(15, "Applying Smooth & Snap pre-processing...")
+            img = cv2.GaussianBlur(img, (5, 5), 0)
+            
+            if self.color_mode == 2:
+                # Binary thresholding aggressivo per disegni al tratto (B/W puro)
+                _, img = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
+            else:
+                # Multi-level Snap per preservare i grigi ma distruggere l'effetto pixel quadrato
+                if self.color_mode == 3:
+                    targets = np.array([0, self.sampled_values[2], 255])
+                else:
+                    targets = np.array([0, self.sampled_values[2], self.sampled_values[1], 255])
+                
+                # Trova il target più vicino per ogni pixel sfocato
+                idx = np.abs(img[..., np.newaxis] - targets).argmin(axis=-1)
+                img = targets[idx].astype(np.uint8)
             
             img_filtered = img
             
@@ -261,7 +273,7 @@ class MeshWorker(QThread):
             if self.cancel_requested: raise InterruptedError("Process cancelled by user")
             
             mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
-            trimesh.repair.fix_normals(mesh)
+            #trimesh.repair.fix_normals(mesh)
             
             t_mesh_end = time.time()
             print(f"[Profiling] Raw mesh generation: {t_mesh_end - t_mesh_start:.2f}s")
