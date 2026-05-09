@@ -187,20 +187,33 @@ class MeshWorker(QThread):
             l2_target = self.sampled_values[2]
             
             if self.is_deckbox_mode:
-                # Deboss: White is flush surface (max_h), Black is deepest groove (base_h)
-                L1_inverted = self.max_h - (L1_Z - self.base_h)
-                L2_inverted = self.max_h - (L2_Z - self.base_h)
+                # Deboss con parametri hardcoded per profondità aggressiva
+                deboss_depth = 2.0      # Profondità dell'incisione (mm)
+                base_thickness = 1.0    # Spessore solido sotto i solchi (mm)
+                deboss_floor = base_thickness                  # Fondo dei solchi (Nero)
+                deboss_surface = base_thickness + deboss_depth  # Superficie flush (Bianco)
+                
+                # Calcola le altezze intermedie proporzionalmente nel range deboss
+                relief_range = self.max_h - self.base_h
+                if relief_range > 0:
+                    L1_ratio = (L1_Z - self.base_h) / relief_range
+                    L2_ratio = (L2_Z - self.base_h) / relief_range
+                else:
+                    L1_ratio = 0.33
+                    L2_ratio = 0.66
+                L1_deboss = deboss_surface - L1_ratio * deboss_depth
+                L2_deboss = deboss_surface - L2_ratio * deboss_depth
                 
                 if self.color_mode == 4:
                     midpoint = (l2_target + l1_target) / 2.0
                     x_points = [0, self.black_clip, midpoint, self.white_clip - 1, self.white_clip, 255]
-                    y_points = [self.base_h, self.base_h, L2_inverted, L1_inverted, self.max_h, self.max_h]
+                    y_points = [deboss_floor, deboss_floor, L2_deboss, L1_deboss, deboss_surface, deboss_surface]
                 elif self.color_mode == 3:
                     x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
-                    y_points = [self.base_h, self.base_h, L1_inverted, self.max_h, self.max_h]
+                    y_points = [deboss_floor, deboss_floor, L1_deboss, deboss_surface, deboss_surface]
                 else: # 2 Colori
                     x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
-                    y_points = [self.base_h, self.base_h, self.base_h, self.max_h, self.max_h]
+                    y_points = [deboss_floor, deboss_floor, deboss_floor, deboss_surface, deboss_surface]
             else:
                 # Relief
                 if self.color_mode == 4:
@@ -300,28 +313,31 @@ class MeshWorker(QThread):
                 if os.path.exists(template_path):
                     box_mesh = trimesh.load(template_path)
                     
-                    # 1. Scala Dinamica: adatta la larghezza della mesh a quella del frontale della scatola
+                    # 1. Scala Dinamica: scala solo X/Y per adattare la larghezza, preservando la Z (profondità deboss)
                     box_extents = box_mesh.extents
                     mesh_extents = mesh.extents
                     scale_factor = box_extents[0] / mesh_extents[0]
-                    mesh.apply_scale(scale_factor)
-                    print(f"[Deckbox] Scale factor: {scale_factor:.4f} (box X={box_extents[0]:.2f}, mesh X={mesh_extents[0]:.2f})")
+                    mesh.vertices[:, 0] *= scale_factor  # Scale X
+                    mesh.vertices[:, 1] *= scale_factor  # Scale Y
+                    # Z resta intatta per preservare la profondità del deboss
+                    print(f"[Deckbox] XY Scale factor: {scale_factor:.4f} (box X={box_extents[0]:.2f}, mesh X={mesh_extents[0]:.2f})")
+                    print(f"[Deckbox] Deboss depth: {deboss_depth:.1f}mm, Base thickness: {base_thickness:.1f}mm, Total plaque: {deboss_surface:.1f}mm")
                     
                     # 2. Rotazione: ruota di 90° attorno all'asse X per mettere la mesh in piedi
                     rot_matrix = tf.rotation_matrix(np.pi / 2, [1, 0, 0])
                     mesh.apply_transform(rot_matrix)
                     
-                    # 3. Allineamento Frontale: monta la targa all'esterno, sporgente dalla faccia frontale
+                    # 3. Allineamento Frontale: incassa la base della targa dentro la parete della scatola
                     box_min = box_mesh.bounds[0]
                     box_max = box_mesh.bounds[1]
                     mesh_min = mesh.bounds[0]
                     mesh_max = mesh.bounds[1]
                     mesh_center = (mesh_min + mesh_max) / 2.0
-                    art_thickness = mesh_max[1] - mesh_min[1]  # Spessore della targa (asse Y dopo rotazione)
+                    art_thickness = mesh_max[1] - mesh_min[1]  # Spessore totale della targa (asse Y dopo rotazione)
                     
                     target_x = (box_min[0] + box_max[0]) / 2.0
-                    # Posiziona il retro della targa al fronte della scatola, con 0.2mm di compenetrazione
-                    target_y = box_min[1] - art_thickness + 0.2
+                    # Incassa base_thickness dentro la parete; il deboss sporge all'esterno
+                    target_y = box_min[1] - art_thickness + base_thickness
                     target_z = (box_min[2] + box_max[2]) / 2.0
                     
                     translation = [
@@ -330,7 +346,7 @@ class MeshWorker(QThread):
                         target_z - mesh_center[2],
                     ]
                     mesh.apply_translation(translation)
-                    print(f"[Deckbox] Art thickness: {art_thickness:.2f}mm")
+                    print(f"[Deckbox] Art thickness: {art_thickness:.2f}mm (base={base_thickness:.1f} inside wall, deboss={deboss_depth:.1f} protruding)")
                     print(f"[Deckbox] Translation: X={translation[0]:.2f}, Y={translation[1]:.2f}, Z={translation[2]:.2f}")
                     
                     # 4. Merge
