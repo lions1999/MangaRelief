@@ -311,23 +311,26 @@ class MeshWorker(QThread):
                     rot_matrix = tf.rotation_matrix(np.pi / 2, [1, 0, 0])
                     mesh.apply_transform(rot_matrix)
                     
-                    # 3. Allineamento Frontale: centra la mesh sulla faccia frontale (min Y) della scatola
+                    # 3. Allineamento Frontale: monta la targa all'esterno, sporgente dalla faccia frontale
                     box_min = box_mesh.bounds[0]
                     box_max = box_mesh.bounds[1]
                     mesh_min = mesh.bounds[0]
                     mesh_max = mesh.bounds[1]
                     mesh_center = (mesh_min + mesh_max) / 2.0
+                    art_thickness = mesh_max[1] - mesh_min[1]  # Spessore della targa (asse Y dopo rotazione)
                     
                     target_x = (box_min[0] + box_max[0]) / 2.0
-                    target_y = box_min[1] + 0.5  # Compenetrazione di 0.5mm nella parete frontale
+                    # Posiziona il retro della targa al fronte della scatola, con 0.2mm di compenetrazione
+                    target_y = box_min[1] - art_thickness + 0.2
                     target_z = (box_min[2] + box_max[2]) / 2.0
                     
                     translation = [
                         target_x - mesh_center[0],
-                        target_y - mesh_min[1],    # Allinea il fronte della mesh al min Y della scatola
+                        target_y - mesh_min[1],
                         target_z - mesh_center[2],
                     ]
                     mesh.apply_translation(translation)
+                    print(f"[Deckbox] Art thickness: {art_thickness:.2f}mm")
                     print(f"[Deckbox] Translation: X={translation[0]:.2f}, Y={translation[1]:.2f}, Z={translation[2]:.2f}")
                     
                     # 4. Merge
@@ -391,46 +394,38 @@ class MeshWorker(QThread):
             if self.is_deckbox_mode:
                 self.progress.emit(96, "Esportazione Deckbox Files...")
                 import os
+                out_dir = os.path.dirname(self.output_path_3mf) if self.output_path_3mf else os.path.dirname(self.output_path)
+                os.makedirs(out_dir, exist_ok=True)
                 
-                # Esporta 3MF se richiesto
-                if self.output_path_3mf:
-                    out_dir_3mf = os.path.dirname(self.output_path_3mf)
-                    os.makedirs(out_dir_3mf, exist_ok=True)
-                    
-                    front_path_3mf = os.path.join(out_dir_3mf, "deckbox_custom_front.3mf")
-                    lid_path_3mf = os.path.join(out_dir_3mf, "deckbox_lid_blank.3mf")
-                    
-                    export_3mf(mesh, front_path_3mf, self.color_changes_z)
-                    
-                    template_lid = os.path.join("assets", "template_coperchio_base.stl")
-                    if os.path.exists(template_lid):
-                        lid_mesh = trimesh.load(template_lid)
-                        export_3mf(lid_mesh, lid_path_3mf, self.color_changes_z)
+                front_path = os.path.join(out_dir, "deckbox_custom_front.3mf")
+                lid_path = os.path.join(out_dir, "deckbox_lid_blank.3mf")
                 
-                # Esporta STL se richiesto
-                front_path_stl = None
+                # Esporta il corpo del deckbox (.3mf)
+                export_3mf(mesh, front_path, self.color_changes_z)
+                
+                # Esporta anche STL se richiesto
                 if self.output_path:
-                    out_dir_stl = os.path.dirname(self.output_path)
-                    os.makedirs(out_dir_stl, exist_ok=True)
-                    
-                    front_path_stl = os.path.join(out_dir_stl, "deckbox_custom_front.stl")
-                    lid_path_stl = os.path.join(out_dir_stl, "deckbox_lid_blank.stl")
-                    
-                    mesh.export(front_path_stl)
-                    
-                    template_lid = os.path.join("assets", "template_coperchio_base.stl")
-                    if os.path.exists(template_lid):
-                        lid_mesh = trimesh.load(template_lid)
-                        lid_mesh.export(lid_path_stl)
+                    stl_dir = os.path.dirname(self.output_path)
+                    os.makedirs(stl_dir, exist_ok=True)
+                    front_stl = os.path.join(stl_dir, "deckbox_custom_front.stl")
+                    mesh.export(front_stl)
+                    print(f"[Deckbox] STL exported: {front_stl}")
+                
+                # Esporta il coperchio liscio come file separato
+                template_lid = os.path.join("assets", "template_coperchio_base.stl")
+                if os.path.exists(template_lid):
+                    lid_mesh = trimesh.load(template_lid)
+                    export_3mf(lid_mesh, lid_path, self.color_changes_z)
+                    if self.output_path:
+                        lid_stl = os.path.join(stl_dir, "deckbox_lid_blank.stl")
+                        lid_mesh.export(lid_stl)
                 
                 t_export_end = time.time()
                 print(f"[Profiling] Export files: {t_export_end - t_export_start:.2f}s")
                 print(f"[Profiling] TOTAL TIME: {t_export_end - t_start_total:.2f}s")
 
                 self.progress.emit(100, "Esportazione Deckbox completata!")
-                stl_result = front_path_stl if front_path_stl else ""
-                mf_result = front_path_3mf if self.output_path_3mf else ""
-                self.finished_ok.emit(stl_result, mf_result)
+                self.finished_ok.emit(front_path, lid_path)
 
             else:
                 if self.output_path:
