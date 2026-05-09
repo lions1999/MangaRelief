@@ -365,11 +365,8 @@ class Manga3DAppController(MainWindowUI):
             ]
 
         # --- Lock UI ---
-        self.btn_load.setEnabled(False)
-        self.btn_generate.setEnabled(False)
+        self.toggle_ui_state(disabled=True)
         self.progress_bar.setValue(0)
-        for btn in self.swatches:
-            btn.setEnabled(False)
 
         # --- Parse selected quality ---
         quality_str = self.cmb_quality.currentText()
@@ -407,11 +404,56 @@ class Manga3DAppController(MainWindowUI):
         self.progress_bar.setValue(val)
         self.lbl_status.setText(msg)
 
-    def unlock_ui(self):
-        self.btn_load.setEnabled(True)
-        self.btn_generate.setEnabled(True)
+    def toggle_ui_state(self, disabled=True):
+        self.btn_load.setEnabled(not disabled)
         for btn in self.swatches:
-            btn.setEnabled(True)
+            btn.setEnabled(not disabled)
+        self.slider_threshold.setEnabled(not disabled)
+        self.chk_auto_z.setEnabled(not disabled)
+        self.spin_base.setEnabled(not disabled)
+        self.spin_maxh.setEnabled(not disabled)
+        self.spin_layer_height.setEnabled(not disabled)
+        self.cmb_quality.setEnabled(not disabled)
+        self.chk_smart_decimate.setEnabled(not disabled)
+        self.spin_white_clip.setEnabled(not disabled)
+        self.btn_auto_white.setEnabled(not disabled)
+        self.spin_black_clip.setEnabled(not disabled)
+        self.chk_export_3mf.setEnabled(not disabled)
+        self.chk_export_stl.setEnabled(not disabled)
+        
+        if not self.chk_auto_z.isChecked():
+            self.spin_z1.setEnabled(not disabled)
+            self.spin_z2.setEnabled(not disabled)
+            self.spin_z3.setEnabled(not disabled)
+
+        if disabled:
+            self.btn_generate.setText("🛑 Cancel")
+            self.btn_generate.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold;")
+            try:
+                self.btn_generate.clicked.disconnect()
+            except TypeError:
+                pass
+            self.btn_generate.clicked.connect(self.cancel_generation)
+            self.btn_generate.setEnabled(True)  # Keep the cancel button interactive
+        else:
+            self.btn_generate.setText("🚀 Generate 3D Models")
+            self.btn_generate.setStyleSheet("")
+            try:
+                self.btn_generate.clicked.disconnect()
+            except TypeError:
+                pass
+            self.btn_generate.clicked.connect(self.generate_stl)
+            self.btn_generate.setEnabled(True)
+
+    def cancel_generation(self):
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.cancel_requested = True
+            self.lbl_status.setText("🛑 Cancelling process, please wait...")
+            self.btn_generate.setEnabled(False)
+            self.btn_generate.setText("Stopping...")
+
+    def unlock_ui(self):
+        self.toggle_ui_state(disabled=False)
 
     def on_generate_done(self, stl_path, path_3mf):
         self.unlock_ui()
@@ -476,8 +518,13 @@ class Manga3DAppController(MainWindowUI):
 
     def on_generate_error(self, err_msg):
         self.unlock_ui()
-        self.lbl_status.setText("❌ Critical QThread error.")
-        QMessageBox.critical(self, "Trimesh Error", f"An error occurred during the 3D generation:\n{err_msg}")
+        if "cancelled" in err_msg.lower():
+            self.lbl_status.setText("🛑 Process cancelled by user.")
+            self.progress_bar.setValue(0)
+            QMessageBox.information(self, "Cancelled", "Generazione annullata correttamente.")
+        else:
+            self.lbl_status.setText("❌ Critical QThread error.")
+            QMessageBox.critical(self, "Worker Error", f"The generation thread crashed:\n{err_msg}")
 
 
 if __name__ == "__main__":
