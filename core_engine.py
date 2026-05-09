@@ -120,7 +120,7 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, color_mode=4):
+                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, color_mode=4, is_deckbox_mode=False):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -136,6 +136,7 @@ class MeshWorker(QThread):
         self.white_clip = white_clip
         self.black_clip = black_clip
         self.color_mode = color_mode
+        self.is_deckbox_mode = is_deckbox_mode
         self.cancel_requested = False
 
     def run(self):
@@ -185,16 +186,33 @@ class MeshWorker(QThread):
             l1_target = self.sampled_values[1]
             l2_target = self.sampled_values[2]
             
-            if self.color_mode == 4:
-                midpoint = (l2_target + l1_target) / 2.0
-                x_points = [0, self.black_clip, midpoint, self.white_clip - 1, self.white_clip, 255]
-                y_points = [self.max_h, self.max_h, L2_Z, L1_Z, self.base_h, self.base_h]
-            elif self.color_mode == 3:
-                x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
-                y_points = [self.max_h, self.max_h, L1_Z, self.base_h, self.base_h]
-            else: # 2 Colori
-                x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
-                y_points = [self.max_h, self.max_h, self.max_h, self.base_h, self.base_h]
+            if self.is_deckbox_mode:
+                # Deboss: White is flush surface (max_h), Black is deepest groove (base_h)
+                L1_inverted = self.max_h - (L1_Z - self.base_h)
+                L2_inverted = self.max_h - (L2_Z - self.base_h)
+                
+                if self.color_mode == 4:
+                    midpoint = (l2_target + l1_target) / 2.0
+                    x_points = [0, self.black_clip, midpoint, self.white_clip - 1, self.white_clip, 255]
+                    y_points = [self.base_h, self.base_h, L2_inverted, L1_inverted, self.max_h, self.max_h]
+                elif self.color_mode == 3:
+                    x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
+                    y_points = [self.base_h, self.base_h, L1_inverted, self.max_h, self.max_h]
+                else: # 2 Colori
+                    x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
+                    y_points = [self.base_h, self.base_h, self.base_h, self.max_h, self.max_h]
+            else:
+                # Relief
+                if self.color_mode == 4:
+                    midpoint = (l2_target + l1_target) / 2.0
+                    x_points = [0, self.black_clip, midpoint, self.white_clip - 1, self.white_clip, 255]
+                    y_points = [self.max_h, self.max_h, L2_Z, L1_Z, self.base_h, self.base_h]
+                elif self.color_mode == 3:
+                    x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
+                    y_points = [self.max_h, self.max_h, L1_Z, self.base_h, self.base_h]
+                else: # 2 Colori
+                    x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
+                    y_points = [self.max_h, self.max_h, self.max_h, self.base_h, self.base_h]
             
             # Evitiamo valori non ordinati (es. se white_clip = 0 o simili configurazioni estreme)
             x_points = np.array(x_points, dtype=np.float64)
@@ -273,7 +291,32 @@ class MeshWorker(QThread):
             if self.cancel_requested: raise InterruptedError("Process cancelled by user")
             
             mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
-            #trimesh.repair.fix_normals(mesh)
+            
+            if self.is_deckbox_mode:
+                self.progress.emit(91, "Assembling Deckbox Template...")
+                import os
+                template_path = os.path.join("assets", "template_deckbox_base.stl")
+                if os.path.exists(template_path):
+                    box_mesh = trimesh.load(template_path)
+                    
+                    # 1. Centra la mesh appena generata
+                    mesh.apply_translation([-dim_x_mm / 2.0, -dim_y_mm / 2.0, 0])
+                    
+                    # 2. Trasla la mesh sulla faccia frontale del template (assumendo sia posizionata in alto Z per la stampa)
+                    box_bounds = box_mesh.bounds
+                    box_center = box_bounds.mean(axis=0)
+                    box_max_z = box_bounds[1][2]
+                    
+                    z_offset = box_max_z - 0.5  # Compenetrazione di 0.5mm
+                    mesh.apply_translation([box_center[0], box_center[1], z_offset])
+                    
+                    # Aggiorna le altezze per i cambi colore dello slicer in base al nuovo offset Z
+                    self.color_changes_z = [z + z_offset for z in self.color_changes_z]
+                    
+                    # 3. Merge
+                    mesh = trimesh.util.concatenate([box_mesh, mesh])
+                else:
+                    print(f"Warning: Deckbox template not found at {template_path}")
             
             t_mesh_end = time.time()
             print(f"[Profiling] Raw mesh generation: {t_mesh_end - t_mesh_start:.2f}s")
@@ -314,35 +357,62 @@ class MeshWorker(QThread):
             self.progress.emit(95, "Mathematical flattening and absolute Z clamping...")
             verts = mesh.vertices.copy()
             
-            # 1. Forza la base piatta
-            bottom_mask = verts[:, 2] < 0.05
-            verts[bottom_mask, 2] = 0.0
+            # 1. Forza la base piatta solo se non siamo in deckbox mode (altrimenti pialliamo il box template!)
+            if not self.is_deckbox_mode:
+                bottom_mask = verts[:, 2] < 0.05
+                verts[bottom_mask, 2] = 0.0
             
             # 2. Ghigliottina matematica (Clamping assoluto) per rimuovere eventuali 'overshoot' da decimazione o smoothing
-            verts[:, 2] = np.clip(verts[:, 2], 0.0, self.max_h)
+            if not self.is_deckbox_mode:
+                verts[:, 2] = np.clip(verts[:, 2], 0.0, self.max_h)
             
             # 3. Quantizzazione finale (Tronca decimali superflui per evitare layer fantasma nello slicer)
             verts[:, 2] = np.round(verts[:, 2], 3)
             
             mesh.vertices = verts
-            trimesh.repair.fix_normals(mesh)
             
-            if self.output_path:
-                self.progress.emit(96, "Esportazione STL...")
-                mesh.export(self.output_path)
+            if self.is_deckbox_mode:
+                self.progress.emit(96, "Esportazione Deckbox Files...")
+                import os
+                out_dir = os.path.dirname(self.output_path_3mf) if self.output_path_3mf else os.path.dirname(self.output_path)
+                os.makedirs(out_dir, exist_ok=True)
                 
-            if self.cancel_requested: raise InterruptedError("Process cancelled by user")
+                front_path = os.path.join(out_dir, "deckbox_custom_front.3mf")
+                lid_path = os.path.join(out_dir, "deckbox_lid_blank.3mf")
+                
+                # Esporta il corpo del deckbox (con il deboss)
+                export_3mf(mesh, front_path, self.color_changes_z)
+                
+                # Esporta il coperchio liscio come file separato
+                template_lid = os.path.join("assets", "template_coperchio_base.stl")
+                if os.path.exists(template_lid):
+                    lid_mesh = trimesh.load(template_lid)
+                    export_3mf(lid_mesh, lid_path, self.color_changes_z)
+                
+                t_export_end = time.time()
+                print(f"[Profiling] Export files: {t_export_end - t_export_start:.2f}s")
+                print(f"[Profiling] TOTAL TIME: {t_export_end - t_start_total:.2f}s")
 
-            if self.output_path_3mf:
-                self.progress.emit(98, "Esportazione 3MF...")
-                export_3mf(mesh, self.output_path_3mf, self.color_changes_z)
+                self.progress.emit(100, "Esportazione Deckbox completata!")
+                self.finished_ok.emit(front_path, lid_path)
 
-            t_export_end = time.time()
-            print(f"[Profiling] Export files: {t_export_end - t_export_start:.2f}s")
-            print(f"[Profiling] TOTAL TIME: {t_export_end - t_start_total:.2f}s")
+            else:
+                if self.output_path:
+                    self.progress.emit(96, "Esportazione STL...")
+                    mesh.export(self.output_path)
+                    
+                if self.cancel_requested: raise InterruptedError("Process cancelled by user")
 
-            self.progress.emit(100, "Esportazione completata!")
-            self.finished_ok.emit(self.output_path, self.output_path_3mf)
+                if self.output_path_3mf:
+                    self.progress.emit(98, "Esportazione 3MF...")
+                    export_3mf(mesh, self.output_path_3mf, self.color_changes_z)
+
+                t_export_end = time.time()
+                print(f"[Profiling] Export files: {t_export_end - t_export_start:.2f}s")
+                print(f"[Profiling] TOTAL TIME: {t_export_end - t_start_total:.2f}s")
+
+                self.progress.emit(100, "Esportazione completata!")
+                self.finished_ok.emit(self.output_path, self.output_path_3mf)
             
             del img
             del img_filtered

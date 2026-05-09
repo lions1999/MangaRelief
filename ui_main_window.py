@@ -248,6 +248,13 @@ class MainWindowUI(QMainWindow):
         right_layout.addStretch()
 
         # BOTTOM CONTROLS
+        deckbox_layout = QHBoxLayout()
+        self.chk_deckbox_mode = QCheckBox("Generate Deckbox")
+        self.chk_deckbox_mode.setChecked(False)
+        self.chk_deckbox_mode.setStyleSheet("font-weight: bold; color: #a6e3a1;")
+        deckbox_layout.addWidget(self.chk_deckbox_mode)
+        right_layout.addLayout(deckbox_layout)
+
         export_layout = QHBoxLayout()
         self.chk_export_3mf = QCheckBox("Export .3MF")
         self.chk_export_3mf.setChecked(True)
