@@ -295,25 +295,42 @@ class MeshWorker(QThread):
             if self.is_deckbox_mode:
                 self.progress.emit(91, "Assembling Deckbox Template...")
                 import os
+                import trimesh.transformations as tf
                 template_path = os.path.join("assets", "template_deckbox_base.stl")
                 if os.path.exists(template_path):
                     box_mesh = trimesh.load(template_path)
                     
-                    # 1. Centra la mesh appena generata
-                    mesh.apply_translation([-dim_x_mm / 2.0, -dim_y_mm / 2.0, 0])
+                    # 1. Scala Dinamica: adatta la larghezza della mesh a quella del frontale della scatola
+                    box_extents = box_mesh.extents
+                    mesh_extents = mesh.extents
+                    scale_factor = box_extents[0] / mesh_extents[0]
+                    mesh.apply_scale(scale_factor)
+                    print(f"[Deckbox] Scale factor: {scale_factor:.4f} (box X={box_extents[0]:.2f}, mesh X={mesh_extents[0]:.2f})")
                     
-                    # 2. Trasla la mesh sulla faccia frontale del template (assumendo sia posizionata in alto Z per la stampa)
-                    box_bounds = box_mesh.bounds
-                    box_center = box_bounds.mean(axis=0)
-                    box_max_z = box_bounds[1][2]
+                    # 2. Rotazione: ruota di 90° attorno all'asse X per mettere la mesh in piedi
+                    rot_matrix = tf.rotation_matrix(np.pi / 2, [1, 0, 0])
+                    mesh.apply_transform(rot_matrix)
                     
-                    z_offset = box_max_z - 0.5  # Compenetrazione di 0.5mm
-                    mesh.apply_translation([box_center[0], box_center[1], z_offset])
+                    # 3. Allineamento Frontale: centra la mesh sulla faccia frontale (min Y) della scatola
+                    box_min = box_mesh.bounds[0]
+                    box_max = box_mesh.bounds[1]
+                    mesh_min = mesh.bounds[0]
+                    mesh_max = mesh.bounds[1]
+                    mesh_center = (mesh_min + mesh_max) / 2.0
                     
-                    # Aggiorna le altezze per i cambi colore dello slicer in base al nuovo offset Z
-                    self.color_changes_z = [z + z_offset for z in self.color_changes_z]
+                    target_x = (box_min[0] + box_max[0]) / 2.0
+                    target_y = box_min[1] + 0.5  # Compenetrazione di 0.5mm nella parete frontale
+                    target_z = (box_min[2] + box_max[2]) / 2.0
                     
-                    # 3. Merge
+                    translation = [
+                        target_x - mesh_center[0],
+                        target_y - mesh_min[1],    # Allinea il fronte della mesh al min Y della scatola
+                        target_z - mesh_center[2],
+                    ]
+                    mesh.apply_translation(translation)
+                    print(f"[Deckbox] Translation: X={translation[0]:.2f}, Y={translation[1]:.2f}, Z={translation[2]:.2f}")
+                    
+                    # 4. Merge
                     mesh = trimesh.util.concatenate([box_mesh, mesh])
                 else:
                     print(f"Warning: Deckbox template not found at {template_path}")
