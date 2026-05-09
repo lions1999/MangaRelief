@@ -393,9 +393,6 @@ class Manga3DAppController(MainWindowUI):
             smart_decimate=self.chk_smart_decimate.isChecked(),
             white_clip=self.spin_white_clip.value(),
             black_clip=self.spin_black_clip.value(),
-            smart_decimate=self.chk_smart_decimate.isChecked(),
-            white_clip=self.spin_white_clip.value(),
-            black_clip=self.spin_black_clip.value(),
             color_mode=getattr(self, 'color_mode_state', 4),
             is_deckbox_mode=self.chk_deckbox_mode.isChecked()
         )
