@@ -349,8 +349,19 @@ class MeshWorker(QThread):
                     print(f"[Deckbox] Art thickness: {art_thickness:.2f}mm (base={base_thickness:.1f} inside wall, deboss={deboss_depth:.1f} protruding)")
                     print(f"[Deckbox] Translation: X={translation[0]:.2f}, Y={translation[1]:.2f}, Z={translation[2]:.2f}")
                     
-                    # 4. Merge
-                    mesh = trimesh.util.concatenate([box_mesh, mesh])
+                    # 4. Boolean Difference: scava la sagoma dell'art dentro il muro della scatola
+                    self.progress.emit(92, "Boolean Difference (carving art into box wall)...")
+                    t_bool_start = time.time()
+                    try:
+                        subtracted_box = trimesh.boolean.difference([box_mesh, mesh])
+                        t_bool_end = time.time()
+                        print(f"[Deckbox] Boolean difference completed in {t_bool_end - t_bool_start:.2f}s")
+                        
+                        # 5. Concatenazione finale: scatola bucata + targa art
+                        mesh = trimesh.util.concatenate([subtracted_box, mesh])
+                    except Exception as e:
+                        print(f"Warning: Boolean difference failed ({e}), falling back to simple concatenation")
+                        mesh = trimesh.util.concatenate([box_mesh, mesh])
                 else:
                     print(f"Warning: Deckbox template not found at {template_path}")
             
