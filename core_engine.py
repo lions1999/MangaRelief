@@ -187,11 +187,11 @@ class MeshWorker(QThread):
             l2_target = self.sampled_values[2]
             
             if self.is_deckbox_mode:
-                # Deboss con parametri hardcoded per profondità aggressiva
-                deboss_depth = 2.0      # Profondità dell'incisione (mm)
-                base_thickness = 1.0    # Spessore solido sotto i solchi (mm)
-                deboss_floor = base_thickness                  # Fondo dei solchi (Nero)
-                deboss_surface = base_thickness + deboss_depth  # Superficie flush (Bianco)
+                # Deep Deboss: escursione Z estrema per massimizzare la visibilità dell'incisione
+                deboss_depth = 3.3      # Profondità dell'incisione (mm) — solchi profondi e netti
+                base_thickness = 0.2    # Micro-spessore sotto i solchi (fondo non bucato)
+                deboss_floor = base_thickness                  # Fondo dei solchi (Nero) = 0.2mm
+                deboss_surface = base_thickness + deboss_depth  # Superficie flush (Bianco) = 3.5mm
                 
                 # Calcola le altezze intermedie proporzionalmente nel range deboss
                 relief_range = self.max_h - self.base_h
@@ -327,7 +327,7 @@ class MeshWorker(QThread):
                     rot_matrix = tf.rotation_matrix(np.pi / 2, [1, 0, 0])
                     mesh.apply_transform(rot_matrix)
                     
-                    # 3. Allineamento Frontale: incassa la base della targa dentro la parete della scatola
+                    # 3. Allineamento Frontale a Filo (Flush Back-Alignment)
                     box_min = box_mesh.bounds[0]
                     box_max = box_mesh.bounds[1]
                     mesh_min = mesh.bounds[0]
@@ -336,8 +336,8 @@ class MeshWorker(QThread):
                     art_thickness = mesh_max[1] - mesh_min[1]  # Spessore totale della targa (asse Y dopo rotazione)
                     
                     target_x = (box_min[0] + box_max[0]) / 2.0
-                    # Incassa base_thickness dentro la parete; il deboss sporge all'esterno
-                    target_y = box_min[1] - art_thickness + base_thickness
+                    # Retro della targa a filo con la faccia frontale + 0.05mm di micro-saldatura
+                    target_y = box_min[1] - 0.05
                     target_z = (box_min[2] + box_max[2]) / 2.0
                     
                     translation = [
