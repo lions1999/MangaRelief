@@ -136,10 +136,16 @@ class MeshWorker(QThread):
         self.white_clip = white_clip
         self.black_clip = black_clip
         self.color_mode = color_mode
+        self.cancel_requested = False
 
     def run(self):
         import gc
+        import time
         try:
+            if self.cancel_requested: raise InterruptedError("Process cancelled by user")
+            t_start_total = time.time()
+            
+            t_img_start = time.time()
             self.progress.emit(5, "Optimizing resolution for 3D mesh...")
             img = self.img_filtered
             
@@ -185,6 +191,12 @@ class MeshWorker(QThread):
             x_points = x_points[sort_idx]
             y_points = y_points[sort_idx]
             
+            if self.cancel_requested: raise InterruptedError("Process cancelled by user")
+            
+            t_img_end = time.time()
+            print(f"[Profiling] Image processing & Z-Mapping setup: {t_img_end - t_img_start:.2f}s")
+            
+            t_mesh_start = time.time()
             self.progress.emit(25, "Generazione Vertici (Z-Mapping)...")
             
             Z_flat = np.interp(img_filtered.flatten(), x_points, y_points)
@@ -246,10 +258,16 @@ class MeshWorker(QThread):
             all_vertices = np.vstack((vertices_top, vertices_bottom))
             all_faces = np.vstack((faces_top, faces_bottom, top_sides, bot_sides, left_sides, right_sides))
             
+            if self.cancel_requested: raise InterruptedError("Process cancelled by user")
+            
             mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
             trimesh.repair.fix_normals(mesh)
             
+            t_mesh_end = time.time()
+            print(f"[Profiling] Raw mesh generation: {t_mesh_end - t_mesh_start:.2f}s")
+            
             if self.smart_decimate and len(mesh.faces) > 200_000:
+                t_dec_start = time.time()
                 # Calcolo del target: partiamo da 100k e aggiungiamo un buffer basato sulla dimensione originale,
                 # ma non superiamo mai i 150k triangoli per mantenere il file .3mf leggerissimo.
                 base_target = 100_000
@@ -274,7 +292,13 @@ class MeshWorker(QThread):
                         trimesh.repair.fix_normals(mesh)
                     except Exception as e:
                         print(f"Warning: Hole filling failed - {e}")
+                
+                t_dec_end = time.time()
+                print(f"[Profiling] Smart Optimization (Decimation): {t_dec_end - t_dec_start:.2f}s")
             
+            if self.cancel_requested: raise InterruptedError("Process cancelled by user")
+            
+            t_export_start = time.time()
             self.progress.emit(95, "Mathematical flattening and absolute Z clamping...")
             verts = mesh.vertices.copy()
             
@@ -294,10 +318,16 @@ class MeshWorker(QThread):
             if self.output_path:
                 self.progress.emit(96, "Esportazione STL...")
                 mesh.export(self.output_path)
+                
+            if self.cancel_requested: raise InterruptedError("Process cancelled by user")
 
             if self.output_path_3mf:
                 self.progress.emit(98, "Esportazione 3MF...")
                 export_3mf(mesh, self.output_path_3mf, self.color_changes_z)
+
+            t_export_end = time.time()
+            print(f"[Profiling] Export files: {t_export_end - t_export_start:.2f}s")
+            print(f"[Profiling] TOTAL TIME: {t_export_end - t_start_total:.2f}s")
 
             self.progress.emit(100, "Esportazione completata!")
             self.finished_ok.emit(self.output_path, self.output_path_3mf)
