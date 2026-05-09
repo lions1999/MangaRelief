@@ -412,6 +412,7 @@ class Manga3DAppController(MainWindowUI):
         self.chk_auto_z.setEnabled(not disabled)
         self.spin_base.setEnabled(not disabled)
         self.spin_maxh.setEnabled(not disabled)
+        self.spin_dim.setEnabled(not disabled)
         self.spin_layer_height.setEnabled(not disabled)
         self.cmb_quality.setEnabled(not disabled)
         self.chk_smart_decimate.setEnabled(not disabled)
