@@ -152,6 +152,11 @@ class MeshWorker(QThread):
                 new_w, new_h = int(w * scale_res), int(h * scale_res)
                 img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
             
+            self.progress.emit(15, "Applying aggressive thresholding and smoothing...")
+            img = cv2.GaussianBlur(img, (3, 3), 0)
+            img[img > self.white_clip] = 255
+            img[img < self.black_clip] = 0
+            
             img_filtered = img
             
             self.progress.emit(20, "Applying Piecewise Interpolation (Z Mapping)...")
@@ -184,6 +189,10 @@ class MeshWorker(QThread):
             
             Z_flat = np.interp(img_filtered.flatten(), x_points, y_points)
             Z_flat = np.round(Z_flat, 3)
+            
+            # Piallatura estrema della Base Z per i pixel bianchi puri (evita fluttuazioni millimetriche)
+            Z_flat[img_filtered.flatten() == 255] = self.base_h
+            
             Z = Z_flat.reshape(img_filtered.shape)
             
             self.progress.emit(40, "Generazione Vertici (MeshGrid)...")
