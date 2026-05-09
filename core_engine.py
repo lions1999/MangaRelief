@@ -224,16 +224,16 @@ class MeshWorker(QThread):
             X, Y = np.meshgrid(x, y)
             
             self.progress.emit(55, "Creazione Facce...")
-            vertices_top = np.column_stack((X.flatten(), Y.flatten(), Z.flatten()))
+            vertices_top = np.column_stack((X.ravel(), Y.ravel(), Z.ravel()))
             idx = np.arange(w * h).reshape((h, w))
-            tl = idx[:-1, :-1].flatten()
-            tr = idx[:-1, 1:].flatten()
-            bl = idx[1:, :-1].flatten()
-            br = idx[1:, 1:].flatten()
+            tl = idx[:-1, :-1].ravel()
+            tr = idx[:-1, 1:].ravel()
+            bl = idx[1:, :-1].ravel()
+            br = idx[1:, 1:].ravel()
             faces_top = np.vstack((np.column_stack((bl, tr, tl)), np.column_stack((br, tr, bl))))
             
             self.progress.emit(70, "Creazione Facce (Fondo)...")
-            vertices_bottom = np.column_stack((X.flatten(), Y.flatten(), np.zeros_like(Z.flatten())))
+            vertices_bottom = np.column_stack((X.ravel(), Y.ravel(), np.zeros_like(Z.ravel())))
             offset = w * h
             tl_b = tl + offset
             tr_b = tr + offset
