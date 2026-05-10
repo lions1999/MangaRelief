@@ -554,6 +554,8 @@ class MeshWorker(QThread):
                     if self.output_path:
                         lid_stl = os.path.join(stl_dir, "deckbox_lid_custom.stl")
                         lid_mesh.export(lid_stl)
+                else:
+                    print(f"WARNING: Lid template not found at {template_lid} — no lid exported!")
                 
                 t_export_end = time.time()
                 print(f"[Profiling] Export files: {t_export_end - t_export_start:.2f}s")
