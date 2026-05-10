@@ -187,13 +187,13 @@ class MeshWorker(QThread):
             l2_target = self.sampled_values[2]
             
             if self.is_deckbox_mode:
-                # Wall Replacement: targa strutturale da 4mm che sostituisce la parete frontale
+                # DEBOSS: superficie piatta in alto (bianco=4mm), solchi scavati in basso (nero=1mm)
                 deboss_depth = 3.0      # Profondità dell'incisione (mm)
                 base_thickness = 1.0    # Spessore solido sul retro (mm)
-                deboss_floor = base_thickness                  # Fondo dei solchi (Nero) = 1.0mm
-                deboss_surface = base_thickness + deboss_depth  # Superficie flush (Bianco) = 4.0mm
+                deboss_floor = base_thickness                  # Z per Nero (fondo solchi) = 1.0mm
+                deboss_surface = base_thickness + deboss_depth  # Z per Bianco (superficie) = 4.0mm
                 
-                # Calcola le altezze intermedie proporzionalmente nel range deboss
+                # Calcola le altezze intermedie proporzionalmente
                 relief_range = self.max_h - self.base_h
                 if relief_range > 0:
                     L1_ratio = (L1_Z - self.base_h) / relief_range
@@ -201,9 +201,11 @@ class MeshWorker(QThread):
                 else:
                     L1_ratio = 0.33
                     L2_ratio = 0.66
+                # L1 (grigio chiaro) → poco sotto la superficie, L2 (grigio scuro) → più vicino al fondo
                 L1_deboss = deboss_surface - L1_ratio * deboss_depth
                 L2_deboss = deboss_surface - L2_ratio * deboss_depth
                 
+                # Mappatura esplicita: pixel scuro → Z basso (scavo), pixel chiaro → Z alto (superficie)
                 if self.color_mode == 4:
                     midpoint = (l2_target + l1_target) / 2.0
                     x_points = [0, self.black_clip, midpoint, self.white_clip - 1, self.white_clip, 255]
@@ -214,6 +216,8 @@ class MeshWorker(QThread):
                 else: # 2 Colori
                     x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
                     y_points = [deboss_floor, deboss_floor, deboss_floor, deboss_surface, deboss_surface]
+                
+                print(f"[Deckbox Z-Map] Black(0)→{deboss_floor}mm, White(255)→{deboss_surface}mm")
             else:
                 # Relief
                 if self.color_mode == 4:
@@ -316,9 +320,9 @@ class MeshWorker(QThread):
                 if os.path.exists(template_path):
                     box_mesh = trimesh.load(template_path)
                     
-                    # 1. Scala Fissa: forza le dimensioni esatte del buco nel template
-                    WALL_WIDTH  = 78.11   # mm (larghezza buco X — da template_deckbox_open.stl)
-                    WALL_HEIGHT = 104.0   # mm (altezza buco Z — da template_deckbox_open.stl)
+                    # 1. Scala Fissa: forza le dimensioni esatte per l'incastro nel template
+                    WALL_WIDTH  = 78.14   # mm (larghezza X)
+                    WALL_HEIGHT = 98.0    # mm (altezza, 98mm per passare sotto la linguetta del coperchio)
                     
                     mesh_extents = mesh.extents
                     scale_x = WALL_WIDTH  / mesh_extents[0]
@@ -333,7 +337,7 @@ class MeshWorker(QThread):
                     rot_matrix = tf.rotation_matrix(np.pi / 2, [1, 0, 0])
                     mesh.apply_transform(rot_matrix)
                     
-                    # 3. Posizionamento: Wall Replacement con overlap di 0.2mm sui bordi
+                    # 3. Posizionamento: Wall Replacement con overlap di 0.1mm sui bordi
                     box_min = box_mesh.bounds[0]
                     box_max = box_mesh.bounds[1]
                     mesh_min = mesh.bounds[0]
@@ -341,13 +345,12 @@ class MeshWorker(QThread):
                     mesh_center = (mesh_min + mesh_max) / 2.0
                     art_thickness = mesh_max[1] - mesh_min[1]
                     
-                    # Centro X/Z della scatola, con 0.2mm di overlap sui bordi
+                    # Centro X/Z della scatola
                     target_x = (box_min[0] + box_max[0]) / 2.0
                     target_z = (box_min[2] + box_max[2]) / 2.0
                     
-                    # Y: fronte della targa a filo con l'esterno della scatola
-                    # Il retro (mesh_min[1] dopo traslazione) entra dentro il buco
-                    target_y = box_min[1] - art_thickness + 0.2  # 0.2mm compenetrazione per saldatura
+                    # Y: fronte della targa a filo con l'esterno, retro dentro il buco
+                    target_y = box_min[1] - art_thickness + 0.1  # 0.1mm compenetrazione per saldatura
                     
                     translation = [
                         target_x - mesh_center[0],
