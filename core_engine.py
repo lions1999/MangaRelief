@@ -337,29 +337,31 @@ class MeshWorker(QThread):
                     rot_matrix = tf.rotation_matrix(np.pi / 2, [1, 0, 0])
                     mesh.apply_transform(rot_matrix)
                     
-                    # 3. Posizionamento: Wall Replacement con overlap di 0.1mm sui bordi
+                    # 3. Posizionamento: Anchor-point alignment (no centroid)
                     box_min = box_mesh.bounds[0]
                     box_max = box_mesh.bounds[1]
                     mesh_min = mesh.bounds[0]
                     mesh_max = mesh.bounds[1]
-                    mesh_center = (mesh_min + mesh_max) / 2.0
                     art_thickness = mesh_max[1] - mesh_min[1]
                     
-                    # Centro X/Z della scatola
-                    target_x = (box_min[0] + box_max[0]) / 2.0
-                    target_z = (box_min[2] + box_max[2]) / 2.0
+                    # X: centra la mesh nella larghezza del vano
+                    box_center_x = (box_min[0] + box_max[0]) / 2.0
+                    mesh_center_x = (mesh_min[0] + mesh_max[0]) / 2.0
+                    tx = box_center_x - mesh_center_x
                     
-                    # Y: fronte della targa a filo con l'esterno, retro dentro il buco
-                    target_y = box_min[1] - art_thickness + 0.1  # 0.1mm compenetrazione per saldatura
+                    # Y: faccia deboss a filo con l'esterno della scatola (box_min[1])
+                    #    la superficie (mesh_min[1] dopo rotazione = vecchia Z alta = bianco)
+                    #    deve essere a filo con l'esterno, il resto va verso l'interno
+                    ty = box_min[1] - mesh_min[1] + 0.1  # +0.1mm per micro-saldatura bordi
                     
-                    translation = [
-                        target_x - mesh_center[0],
-                        target_y - mesh_min[1],
-                        target_z - mesh_center[2],
-                    ]
-                    mesh.apply_translation(translation)
+                    # Z: base della mesh a terra, allineata con la base della scatola
+                    tz = box_min[2] - mesh_min[2]
+                    
+                    mesh.apply_translation([tx, ty, tz])
                     print(f"[Deckbox] Art thickness: {art_thickness:.2f}mm")
-                    print(f"[Deckbox] Translation: X={translation[0]:.2f}, Y={translation[1]:.2f}, Z={translation[2]:.2f}")
+                    print(f"[Deckbox] Mesh bounds PRE-translate: min={mesh_min}, max={mesh_max}")
+                    print(f"[Deckbox] Box bounds: min={box_min}, max={box_max}")
+                    print(f"[Deckbox] Translation: X={tx:.2f}, Y={ty:.2f}, Z={tz:.2f}")
                     
                     # 4. Concatenazione: incolla la parete art sul template aperto
                     mesh = trimesh.util.concatenate([box_mesh, mesh])
