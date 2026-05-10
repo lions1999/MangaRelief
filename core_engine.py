@@ -454,11 +454,11 @@ class MeshWorker(QThread):
                     print(f"[Deckbox] STL exported: {front_stl}")
                 
                 # Esporta il coperchio con incisione logo TCG
-                template_lid = os.path.join("assets", "template_coperchio_base.stl")
+                template_lid = os.path.join("assets", "template_coperchio_bucato.stl")
                 if os.path.exists(template_lid):
                     lid_mesh = trimesh.load(template_lid)
                     
-                    # --- Incisione Logo TCG sul coperchio ---
+                    # --- Incisione Logo TCG: Plug & Play nella vaschetta ---
                     logo_filename = self.TCG_LOGO_MAP.get(self.tcg_name)
                     logo_path = os.path.join("assets", logo_filename) if logo_filename else None
                     
@@ -471,29 +471,28 @@ class MeshWorker(QThread):
                                 logo_img = cv2.GaussianBlur(logo_img, (3, 3), 0)
                                 _, logo_img = cv2.threshold(logo_img, 150, 255, cv2.THRESH_BINARY)
                                 
-                                # Parametri incisione coperchio (stessi del frontale, cap a 3.6mm)
-                                LID_PLAQUE_H = 3.6     # Spessore massimo targa coperchio (mm)
-                                ENGRAVE_DEPTH = 2.6    # Profondità scavo (mm) — stessa aggressività del frontale
-                                LID_AREA_W = 69.0      # Larghezza area utile (mm)
-                                LID_AREA_H = 31.0      # Altezza area utile (mm)
-                                NOTCH_CLEARANCE = 15.0  # Spazio dal bordo inferiore per la linguetta dito (mm)
+                                # Parametri tassello (plug) per la vaschetta del coperchio
+                                PLUG_W = 60.0           # Larghezza tassello (mm) — esatta come la vaschetta
+                                PLUG_H = 30.0           # Altezza tassello (mm) — esatta come la vaschetta
+                                PLUG_Z = 2.0            # Spessore totale tassello (mm)
+                                ENGRAVE_FLOOR = 0.4     # Fondo incisione (mm) — base solida
+                                ENGRAVE_SURFACE = PLUG_Z  # Superficie (mm) = 2.0
+                                ENGRAVE_DEPTH = ENGRAVE_SURFACE - ENGRAVE_FLOOR  # 1.6mm di scavo
+                                NOTCH_Y_OFFSET = 16.818  # Offset Y esatto dal bordo inferiore del coperchio (mm)
                                 
-                                engrave_floor = LID_PLAQUE_H - ENGRAVE_DEPTH  # 1.0mm (fondo scavo)
-                                engrave_surface = LID_PLAQUE_H                # 3.6mm (superficie)
-                                
-                                # Z-mapping: nero (tratti logo) → superficie, bianco (sfondo) → scavato
+                                # Z-mapping: nero (tratti logo) → superficie (2.0), bianco (sfondo) → scavato (0.4)
                                 logo_norm = logo_img.astype(np.float64) / 255.0
-                                Z_logo = engrave_surface - logo_norm * ENGRAVE_DEPTH  # nero=3.6, bianco=1.0
+                                Z_logo = ENGRAVE_SURFACE - logo_norm * ENGRAVE_DEPTH  # nero=2.0, bianco=0.4
                                 Z_logo = np.round(Z_logo, 3)
                                 
-                                # Genera mesh logo con la stessa pipeline vettorializzata
+                                # Genera mesh tassello con pipeline vettorializzata
                                 lh, lw = logo_img.shape
-                                lx = np.linspace(0, LID_AREA_W, lw)
-                                ly = np.linspace(0, LID_AREA_H, lh)[::-1]
+                                lx = np.linspace(0, PLUG_W, lw)
+                                ly = np.linspace(0, PLUG_H, lh)[::-1]
                                 LX, LY = np.meshgrid(lx, ly)
                                 
                                 verts_top = np.column_stack((LX.ravel(), LY.ravel(), Z_logo.ravel()))
-                                verts_bot = np.column_stack((LX.ravel(), LY.ravel(), np.full(lw * lh, engrave_floor)))
+                                verts_bot = np.column_stack((LX.ravel(), LY.ravel(), np.full(lw * lh, ENGRAVE_FLOOR)))
                                 
                                 lidx = np.arange(lw * lh).reshape((lh, lw))
                                 tl = lidx[:-1, :-1].ravel()
@@ -519,32 +518,30 @@ class MeshWorker(QThread):
                                 all_f = np.vstack((f_top, f_bot, s1, s2, s3, s4))
                                 logo_mesh = trimesh.Trimesh(vertices=all_v, faces=all_f, process=False)
                                 
-                                # Posizionamento: X centrato, Y spostato sopra il notch
+                                # --- Allineamento Chirurgico (Plug & Play) ---
                                 lid_min = lid_mesh.bounds[0]
                                 lid_max = lid_mesh.bounds[1]
                                 logo_min = logo_mesh.bounds[0]
                                 logo_max = logo_mesh.bounds[1]
                                 
-                                # X: centratura assoluta
+                                # X: centratura assoluta sul coperchio
                                 lid_center_x = (lid_min[0] + lid_max[0]) / 2.0
                                 logo_center_x = (logo_min[0] + logo_max[0]) / 2.0
                                 tx = lid_center_x - logo_center_x
                                 
-                                # Y: area utile = da (lid_min_y + NOTCH_CLEARANCE) a lid_max_y
-                                safe_y_min = lid_min[1] + NOTCH_CLEARANCE
-                                safe_y_max = lid_max[1]
-                                safe_center_y = (safe_y_min + safe_y_max) / 2.0
-                                logo_center_y = (logo_min[1] + logo_max[1]) / 2.0
-                                ty = safe_center_y - logo_center_y
+                                # Y: bordo inferiore del tassello a lid_min[1] + 16.818mm
+                                ty = (lid_min[1] + NOTCH_Y_OFFSET) - logo_min[1]
                                 
-                                tz = 0  # Z già allineata (engrave_surface = 3.6 = altezza targa)
+                                # Z: superficie del tassello a filo con la superficie del coperchio
+                                tz = lid_max[2] - logo_max[2]
+                                
                                 logo_mesh.apply_translation([tx, ty, tz])
                                 
-                                print(f"[Deckbox Lid] Logo '{self.tcg_name}' engraved: {LID_AREA_W}x{LID_AREA_H}mm, depth={ENGRAVE_DEPTH}mm")
-                                print(f"[Deckbox Lid] Notch clearance: {NOTCH_CLEARANCE}mm, safe Y range: {safe_y_min:.1f}-{safe_y_max:.1f}mm")
-                                print(f"[Deckbox Lid] Translation: X={tx:.2f}, Y={ty:.2f}")
+                                print(f"[Deckbox Lid] Plug '{self.tcg_name}': {PLUG_W}x{PLUG_H}x{PLUG_Z}mm, engrave={ENGRAVE_DEPTH:.1f}mm")
+                                print(f"[Deckbox Lid] Y-offset: {NOTCH_Y_OFFSET}mm from lid bottom")
+                                print(f"[Deckbox Lid] Translation: X={tx:.2f}, Y={ty:.2f}, Z={tz:.2f}")
                                 
-                                # Concatena il logo inciso sul coperchio
+                                # Concatena il tassello nella vaschetta del coperchio
                                 lid_mesh = trimesh.util.concatenate([lid_mesh, logo_mesh])
                         except Exception as e:
                             print(f"Warning: Logo engraving failed ({e}), exporting blank lid")
