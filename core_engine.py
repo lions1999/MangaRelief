@@ -317,8 +317,8 @@ class MeshWorker(QThread):
                     box_mesh = trimesh.load(template_path)
                     
                     # 1. Scala Fissa: forza le dimensioni esatte del buco nel template
-                    WALL_WIDTH  = 78.14   # mm (larghezza buco X)
-                    WALL_HEIGHT = 100.0    # mm (altezza buco Z)
+                    WALL_WIDTH  = 78.11   # mm (larghezza buco X — da template_deckbox_open.stl)
+                    WALL_HEIGHT = 104.0   # mm (altezza buco Z — da template_deckbox_open.stl)
                     
                     mesh_extents = mesh.extents
                     scale_x = WALL_WIDTH  / mesh_extents[0]
