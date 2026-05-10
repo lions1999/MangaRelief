@@ -101,7 +101,7 @@ class MainWindowUI(QMainWindow):
         # --- RIGHT PANEL: CONTROLLI (Wrapped in ScrollArea) ---
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFixedWidth(420)
+        self.scroll_area.setFixedWidth(450)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
         splitter.addWidget(self.scroll_area)
@@ -109,7 +109,7 @@ class MainWindowUI(QMainWindow):
         right_panel = QWidget()
         self.scroll_area.setWidget(right_panel)
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(10, 5, 15, 5)
+        right_layout.setContentsMargins(10, 5, 25, 5)
         
         self.btn_load = QPushButton("📂 Load Manga")
         right_layout.addWidget(self.btn_load)
