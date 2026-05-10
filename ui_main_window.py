@@ -253,6 +253,12 @@ class MainWindowUI(QMainWindow):
         self.chk_deckbox_mode.setChecked(False)
         self.chk_deckbox_mode.setStyleSheet("font-weight: bold; color: #a6e3a1;")
         deckbox_layout.addWidget(self.chk_deckbox_mode)
+        
+        self.combo_tcg_select = QComboBox()
+        self.combo_tcg_select.addItems(["Yu-Gi-Oh!", "Pokémon", "Magic", "One Piece"])
+        self.combo_tcg_select.setFixedWidth(130)
+        self.combo_tcg_select.setStyleSheet("font-weight: bold;")
+        deckbox_layout.addWidget(self.combo_tcg_select)
         right_layout.addLayout(deckbox_layout)
 
         export_layout = QHBoxLayout()
