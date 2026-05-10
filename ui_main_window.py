@@ -256,8 +256,8 @@ class MainWindowUI(QMainWindow):
         
         self.combo_tcg_select = QComboBox()
         self.combo_tcg_select.addItems(["Yu-Gi-Oh!", "Pokémon", "Magic", "One Piece"])
-        self.combo_tcg_select.setFixedWidth(130)
-        self.combo_tcg_select.setStyleSheet("font-weight: bold;")
+        self.combo_tcg_select.setMinimumWidth(160)
+        self.combo_tcg_select.setStyleSheet("font-weight: bold; padding: 4px 8px; min-height: 22px;")
         deckbox_layout.addWidget(self.combo_tcg_select)
         right_layout.addLayout(deckbox_layout)
 
