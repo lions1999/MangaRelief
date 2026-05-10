@@ -471,18 +471,19 @@ class MeshWorker(QThread):
                                 logo_img = cv2.GaussianBlur(logo_img, (3, 3), 0)
                                 _, logo_img = cv2.threshold(logo_img, 150, 255, cv2.THRESH_BINARY)
                                 
-                                # Parametri incisione coperchio
-                                LID_HEIGHT = 3.7       # Altezza totale del coperchio (mm)
-                                ENGRAVE_DEPTH = 1.5    # Profondità incisione (mm)
+                                # Parametri incisione coperchio (stessi del frontale, cap a 3.6mm)
+                                LID_PLAQUE_H = 3.6     # Spessore massimo targa coperchio (mm)
+                                ENGRAVE_DEPTH = 2.6    # Profondità scavo (mm) — stessa aggressività del frontale
                                 LID_AREA_W = 69.0      # Larghezza area utile (mm)
                                 LID_AREA_H = 31.0      # Altezza area utile (mm)
+                                NOTCH_CLEARANCE = 15.0  # Spazio dal bordo inferiore per la linguetta dito (mm)
                                 
-                                engrave_floor = LID_HEIGHT - ENGRAVE_DEPTH  # 2.2mm
-                                engrave_surface = LID_HEIGHT                # 3.7mm
+                                engrave_floor = LID_PLAQUE_H - ENGRAVE_DEPTH  # 1.0mm (fondo scavo)
+                                engrave_surface = LID_PLAQUE_H                # 3.6mm (superficie)
                                 
                                 # Z-mapping: nero (tratti logo) → superficie, bianco (sfondo) → scavato
                                 logo_norm = logo_img.astype(np.float64) / 255.0
-                                Z_logo = engrave_surface - logo_norm * ENGRAVE_DEPTH  # nero=3.7, bianco=2.2
+                                Z_logo = engrave_surface - logo_norm * ENGRAVE_DEPTH  # nero=3.6, bianco=1.0
                                 Z_logo = np.round(Z_logo, 3)
                                 
                                 # Genera mesh logo con la stessa pipeline vettorializzata
@@ -518,22 +519,29 @@ class MeshWorker(QThread):
                                 all_f = np.vstack((f_top, f_bot, s1, s2, s3, s4))
                                 logo_mesh = trimesh.Trimesh(vertices=all_v, faces=all_f, process=False)
                                 
-                                # Posiziona il logo centrato sull'area utile del coperchio
+                                # Posizionamento: X centrato, Y spostato sopra il notch
                                 lid_min = lid_mesh.bounds[0]
                                 lid_max = lid_mesh.bounds[1]
-                                lid_center_x = (lid_min[0] + lid_max[0]) / 2.0
-                                lid_center_y = (lid_min[1] + lid_max[1]) / 2.0
                                 logo_min = logo_mesh.bounds[0]
                                 logo_max = logo_mesh.bounds[1]
-                                logo_center_x = (logo_min[0] + logo_max[0]) / 2.0
-                                logo_center_y = (logo_min[1] + logo_max[1]) / 2.0
                                 
+                                # X: centratura assoluta
+                                lid_center_x = (lid_min[0] + lid_max[0]) / 2.0
+                                logo_center_x = (logo_min[0] + logo_max[0]) / 2.0
                                 tx = lid_center_x - logo_center_x
-                                ty = lid_center_y - logo_center_y
-                                tz = 0  # Z già allineata (engrave_surface = 3.7 = altezza coperchio)
+                                
+                                # Y: area utile = da (lid_min_y + NOTCH_CLEARANCE) a lid_max_y
+                                safe_y_min = lid_min[1] + NOTCH_CLEARANCE
+                                safe_y_max = lid_max[1]
+                                safe_center_y = (safe_y_min + safe_y_max) / 2.0
+                                logo_center_y = (logo_min[1] + logo_max[1]) / 2.0
+                                ty = safe_center_y - logo_center_y
+                                
+                                tz = 0  # Z già allineata (engrave_surface = 3.6 = altezza targa)
                                 logo_mesh.apply_translation([tx, ty, tz])
                                 
                                 print(f"[Deckbox Lid] Logo '{self.tcg_name}' engraved: {LID_AREA_W}x{LID_AREA_H}mm, depth={ENGRAVE_DEPTH}mm")
+                                print(f"[Deckbox Lid] Notch clearance: {NOTCH_CLEARANCE}mm, safe Y range: {safe_y_min:.1f}-{safe_y_max:.1f}mm")
                                 print(f"[Deckbox Lid] Translation: X={tx:.2f}, Y={ty:.2f}")
                                 
                                 # Concatena il logo inciso sul coperchio
