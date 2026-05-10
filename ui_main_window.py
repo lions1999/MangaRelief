@@ -248,7 +248,9 @@ class MainWindowUI(QMainWindow):
         right_layout.addStretch()
 
         # BOTTOM CONTROLS
+        right_layout.addSpacing(10)
         deckbox_layout = QHBoxLayout()
+        deckbox_layout.setContentsMargins(0, 5, 0, 5)
         self.chk_deckbox_mode = QCheckBox("Generate Deckbox")
         self.chk_deckbox_mode.setChecked(False)
         self.chk_deckbox_mode.setStyleSheet("font-weight: bold; color: #a6e3a1;")
