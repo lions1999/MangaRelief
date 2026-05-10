@@ -120,7 +120,7 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, color_mode=4, is_deckbox_mode=False):
+                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, color_mode=4, is_deckbox_mode=False, tcg_name='Yu-Gi-Oh!'):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -137,7 +137,16 @@ class MeshWorker(QThread):
         self.black_clip = black_clip
         self.color_mode = color_mode
         self.is_deckbox_mode = is_deckbox_mode
+        self.tcg_name = tcg_name
         self.cancel_requested = False
+        
+        # Mapping TCG names to logo asset files
+        self.TCG_LOGO_MAP = {
+            'Yu-Gi-Oh!': 'yugioh_logo.jpg',
+            'Pokémon': 'pokemon_logo.jpg',
+            'Magic': 'magic_logo.jpg',
+            'One Piece': 'onepiece_logo.jpg',
+        }
 
     def run(self):
         import gc
@@ -444,13 +453,101 @@ class MeshWorker(QThread):
                     mesh.export(front_stl)
                     print(f"[Deckbox] STL exported: {front_stl}")
                 
-                # Esporta il coperchio liscio come file separato
+                # Esporta il coperchio con incisione logo TCG
                 template_lid = os.path.join("assets", "template_coperchio_base.stl")
                 if os.path.exists(template_lid):
                     lid_mesh = trimesh.load(template_lid)
-                    export_3mf(lid_mesh, lid_path, self.color_changes_z)
+                    
+                    # --- Incisione Logo TCG sul coperchio ---
+                    logo_filename = self.TCG_LOGO_MAP.get(self.tcg_name)
+                    logo_path = os.path.join("assets", logo_filename) if logo_filename else None
+                    
+                    if logo_path and os.path.exists(logo_path):
+                        self.progress.emit(97, f"Engraving {self.tcg_name} logo on lid...")
+                        try:
+                            logo_img = cv2.imread(logo_path, cv2.IMREAD_GRAYSCALE)
+                            if logo_img is not None:
+                                # Smooth & binarize per contorni netti
+                                logo_img = cv2.GaussianBlur(logo_img, (3, 3), 0)
+                                _, logo_img = cv2.threshold(logo_img, 150, 255, cv2.THRESH_BINARY)
+                                
+                                # Parametri incisione coperchio
+                                LID_HEIGHT = 3.7       # Altezza totale del coperchio (mm)
+                                ENGRAVE_DEPTH = 1.5    # Profondità incisione (mm)
+                                LID_AREA_W = 69.0      # Larghezza area utile (mm)
+                                LID_AREA_H = 31.0      # Altezza area utile (mm)
+                                
+                                engrave_floor = LID_HEIGHT - ENGRAVE_DEPTH  # 2.2mm
+                                engrave_surface = LID_HEIGHT                # 3.7mm
+                                
+                                # Z-mapping: nero (tratti logo) → superficie, bianco (sfondo) → scavato
+                                logo_norm = logo_img.astype(np.float64) / 255.0
+                                Z_logo = engrave_surface - logo_norm * ENGRAVE_DEPTH  # nero=3.7, bianco=2.2
+                                Z_logo = np.round(Z_logo, 3)
+                                
+                                # Genera mesh logo con la stessa pipeline vettorializzata
+                                lh, lw = logo_img.shape
+                                lx = np.linspace(0, LID_AREA_W, lw)
+                                ly = np.linspace(0, LID_AREA_H, lh)[::-1]
+                                LX, LY = np.meshgrid(lx, ly)
+                                
+                                verts_top = np.column_stack((LX.ravel(), LY.ravel(), Z_logo.ravel()))
+                                verts_bot = np.column_stack((LX.ravel(), LY.ravel(), np.full(lw * lh, engrave_floor)))
+                                
+                                lidx = np.arange(lw * lh).reshape((lh, lw))
+                                tl = lidx[:-1, :-1].ravel()
+                                tr = lidx[:-1, 1:].ravel()
+                                bl = lidx[1:, :-1].ravel()
+                                br = lidx[1:, 1:].ravel()
+                                
+                                f_top = np.vstack((np.column_stack((bl, tr, tl)), np.column_stack((br, tr, bl))))
+                                off = lw * lh
+                                f_bot = np.vstack((np.column_stack((tl+off, tr+off, bl+off)), np.column_stack((bl+off, tr+off, br+off))))
+                                
+                                # Sides
+                                v1, v2 = lidx[0, :-1], lidx[0, 1:]
+                                s1 = np.vstack((np.column_stack((v1, v2, v1+off)), np.column_stack((v2, v2+off, v1+off))))
+                                v1, v2 = lidx[-1, :-1], lidx[-1, 1:]
+                                s2 = np.vstack((np.column_stack((v2, v1, v1+off)), np.column_stack((v2+off, v2, v1+off))))
+                                v1, v2 = lidx[:-1, 0], lidx[1:, 0]
+                                s3 = np.vstack((np.column_stack((v1, v2, v1+off)), np.column_stack((v2, v2+off, v1+off))))
+                                v1, v2 = lidx[:-1, -1], lidx[1:, -1]
+                                s4 = np.vstack((np.column_stack((v2, v1, v1+off)), np.column_stack((v2+off, v2, v1+off))))
+                                
+                                all_v = np.vstack((verts_top, verts_bot))
+                                all_f = np.vstack((f_top, f_bot, s1, s2, s3, s4))
+                                logo_mesh = trimesh.Trimesh(vertices=all_v, faces=all_f, process=False)
+                                
+                                # Posiziona il logo centrato sull'area utile del coperchio
+                                lid_min = lid_mesh.bounds[0]
+                                lid_max = lid_mesh.bounds[1]
+                                lid_center_x = (lid_min[0] + lid_max[0]) / 2.0
+                                lid_center_y = (lid_min[1] + lid_max[1]) / 2.0
+                                logo_min = logo_mesh.bounds[0]
+                                logo_max = logo_mesh.bounds[1]
+                                logo_center_x = (logo_min[0] + logo_max[0]) / 2.0
+                                logo_center_y = (logo_min[1] + logo_max[1]) / 2.0
+                                
+                                tx = lid_center_x - logo_center_x
+                                ty = lid_center_y - logo_center_y
+                                tz = 0  # Z già allineata (engrave_surface = 3.7 = altezza coperchio)
+                                logo_mesh.apply_translation([tx, ty, tz])
+                                
+                                print(f"[Deckbox Lid] Logo '{self.tcg_name}' engraved: {LID_AREA_W}x{LID_AREA_H}mm, depth={ENGRAVE_DEPTH}mm")
+                                print(f"[Deckbox Lid] Translation: X={tx:.2f}, Y={ty:.2f}")
+                                
+                                # Concatena il logo inciso sul coperchio
+                                lid_mesh = trimesh.util.concatenate([lid_mesh, logo_mesh])
+                        except Exception as e:
+                            print(f"Warning: Logo engraving failed ({e}), exporting blank lid")
+                    else:
+                        print(f"[Deckbox Lid] Logo file not found for '{self.tcg_name}', exporting blank lid")
+                    
+                    # Esporta coperchio (con o senza logo)
+                    lid_custom_path = os.path.join(out_dir, "deckbox_lid_custom.3mf")
+                    export_3mf(lid_mesh, lid_custom_path, self.color_changes_z)
                     if self.output_path:
-                        lid_stl = os.path.join(stl_dir, "deckbox_lid_blank.stl")
+                        lid_stl = os.path.join(stl_dir, "deckbox_lid_custom.stl")
                         lid_mesh.export(lid_stl)
                 
                 t_export_end = time.time()
@@ -458,7 +555,7 @@ class MeshWorker(QThread):
                 print(f"[Profiling] TOTAL TIME: {t_export_end - t_start_total:.2f}s")
 
                 self.progress.emit(100, "Esportazione Deckbox completata!")
-                self.finished_ok.emit(front_path, lid_path)
+                self.finished_ok.emit(front_path, lid_custom_path if os.path.exists(template_lid) else lid_path)
 
             else:
                 if self.output_path:
