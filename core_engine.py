@@ -187,13 +187,15 @@ class MeshWorker(QThread):
             l2_target = self.sampled_values[2]
             
             if self.is_deckbox_mode:
-                # DEBOSS: superficie piatta in alto (bianco=4mm), solchi scavati in basso (nero=1mm)
-                deboss_depth = 3.0      # Profondità dell'incisione (mm)
+                # INCISIONE: lo sfondo (bianco) viene scavato, i tratti (nero) restano in superficie
+                # Pixel scuro → Z alto (rimane a livello parete = 4mm)
+                # Pixel chiaro → Z basso (scavato nel muro = 1mm)
+                deboss_depth = 3.0      # Profondità dello scavo (mm)
                 base_thickness = 1.0    # Spessore solido sul retro (mm)
-                deboss_floor = base_thickness                  # Z per Nero (fondo solchi) = 1.0mm
-                deboss_surface = base_thickness + deboss_depth  # Z per Bianco (superficie) = 4.0mm
+                deboss_floor = base_thickness                  # Z per Bianco (fondo scavo) = 1.0mm
+                deboss_surface = base_thickness + deboss_depth  # Z per Nero (superficie) = 4.0mm
                 
-                # Calcola le altezze intermedie proporzionalmente
+                # Calcola le altezze intermedie proporzionalmente (invertite)
                 relief_range = self.max_h - self.base_h
                 if relief_range > 0:
                     L1_ratio = (L1_Z - self.base_h) / relief_range
@@ -201,23 +203,23 @@ class MeshWorker(QThread):
                 else:
                     L1_ratio = 0.33
                     L2_ratio = 0.66
-                # L1 (grigio chiaro) → poco sotto la superficie, L2 (grigio scuro) → più vicino al fondo
-                L1_deboss = deboss_surface - L1_ratio * deboss_depth
-                L2_deboss = deboss_surface - L2_ratio * deboss_depth
+                # L1 (grigio chiaro) → più vicino al fondo scavo, L2 (grigio scuro) → più vicino alla superficie
+                L1_deboss = deboss_floor + L1_ratio * deboss_depth
+                L2_deboss = deboss_floor + L2_ratio * deboss_depth
                 
-                # Mappatura esplicita: pixel scuro → Z basso (scavo), pixel chiaro → Z alto (superficie)
+                # Mappatura INVERTITA: pixel scuro → Z alto (superficie), pixel chiaro → Z basso (scavo)
                 if self.color_mode == 4:
                     midpoint = (l2_target + l1_target) / 2.0
                     x_points = [0, self.black_clip, midpoint, self.white_clip - 1, self.white_clip, 255]
-                    y_points = [deboss_floor, deboss_floor, L2_deboss, L1_deboss, deboss_surface, deboss_surface]
+                    y_points = [deboss_surface, deboss_surface, L2_deboss, L1_deboss, deboss_floor, deboss_floor]
                 elif self.color_mode == 3:
                     x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
-                    y_points = [deboss_floor, deboss_floor, L1_deboss, deboss_surface, deboss_surface]
+                    y_points = [deboss_surface, deboss_surface, L1_deboss, deboss_floor, deboss_floor]
                 else: # 2 Colori
                     x_points = [0, self.black_clip, self.white_clip - 1, self.white_clip, 255]
-                    y_points = [deboss_floor, deboss_floor, deboss_floor, deboss_surface, deboss_surface]
+                    y_points = [deboss_surface, deboss_surface, deboss_surface, deboss_floor, deboss_floor]
                 
-                print(f"[Deckbox Z-Map] Black(0)→{deboss_floor}mm, White(255)→{deboss_surface}mm")
+                print(f"[Deckbox Z-Map] Black(0)→{deboss_surface}mm (surface), White(255)→{deboss_floor}mm (carved)")
             else:
                 # Relief
                 if self.color_mode == 4:
@@ -251,7 +253,8 @@ class MeshWorker(QThread):
             
             # Piallatura estrema della Base Z per i pixel bianchi puri
             if self.is_deckbox_mode:
-                Z_flat[img_filtered.flatten() == 255] = deboss_surface
+                Z_flat[img_filtered.flatten() == 255] = deboss_floor   # Bianco = fondo scavo
+                Z_flat[img_filtered.flatten() == 0] = deboss_surface   # Nero = superficie
             else:
                 Z_flat[img_filtered.flatten() == 255] = self.base_h
             
