@@ -187,11 +187,11 @@ class MeshWorker(QThread):
             l2_target = self.sampled_values[2]
             
             if self.is_deckbox_mode:
-                # Deep Deboss: escursione Z estrema per massimizzare la visibilità dell'incisione
-                deboss_depth = 3.3      # Profondità dell'incisione (mm) — solchi profondi e netti
-                base_thickness = 0.2    # Micro-spessore sotto i solchi (fondo non bucato)
-                deboss_floor = base_thickness                  # Fondo dei solchi (Nero) = 0.2mm
-                deboss_surface = base_thickness + deboss_depth  # Superficie flush (Bianco) = 3.5mm
+                # Wall Replacement: targa strutturale da 4mm che sostituisce la parete frontale
+                deboss_depth = 3.0      # Profondità dell'incisione (mm)
+                base_thickness = 1.0    # Spessore solido sul retro (mm)
+                deboss_floor = base_thickness                  # Fondo dei solchi (Nero) = 1.0mm
+                deboss_surface = base_thickness + deboss_depth  # Superficie flush (Bianco) = 4.0mm
                 
                 # Calcola le altezze intermedie proporzionalmente nel range deboss
                 relief_range = self.max_h - self.base_h
@@ -245,8 +245,11 @@ class MeshWorker(QThread):
             Z_flat = np.interp(img_filtered.flatten(), x_points, y_points)
             Z_flat = np.round(Z_flat, 3)
             
-            # Piallatura estrema della Base Z per i pixel bianchi puri (evita fluttuazioni millimetriche)
-            Z_flat[img_filtered.flatten() == 255] = self.base_h
+            # Piallatura estrema della Base Z per i pixel bianchi puri
+            if self.is_deckbox_mode:
+                Z_flat[img_filtered.flatten() == 255] = deboss_surface
+            else:
+                Z_flat[img_filtered.flatten() == 255] = self.base_h
             
             Z = Z_flat.reshape(img_filtered.shape)
             
@@ -306,39 +309,45 @@ class MeshWorker(QThread):
             mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
             
             if self.is_deckbox_mode:
-                self.progress.emit(91, "Assembling Deckbox Template...")
+                self.progress.emit(91, "Assembling Deckbox (Wall Replacement)...")
                 import os
                 import trimesh.transformations as tf
-                template_path = os.path.join("assets", "template_deckbox_base.stl")
+                template_path = os.path.join("assets", "template_deckbox_open.stl")
                 if os.path.exists(template_path):
                     box_mesh = trimesh.load(template_path)
                     
-                    # 1. Scala Dinamica: scala solo X/Y per adattare la larghezza, preservando la Z (profondità deboss)
-                    box_extents = box_mesh.extents
+                    # 1. Scala Fissa: forza le dimensioni esatte del buco nel template
+                    WALL_WIDTH  = 78.14   # mm (larghezza buco X)
+                    WALL_HEIGHT = 100.0    # mm (altezza buco Z)
+                    
                     mesh_extents = mesh.extents
-                    scale_factor = box_extents[0] / mesh_extents[0]
-                    mesh.vertices[:, 0] *= scale_factor  # Scale X
-                    mesh.vertices[:, 1] *= scale_factor  # Scale Y
-                    # Z resta intatta per preservare la profondità del deboss
-                    print(f"[Deckbox] XY Scale factor: {scale_factor:.4f} (box X={box_extents[0]:.2f}, mesh X={mesh_extents[0]:.2f})")
-                    print(f"[Deckbox] Deboss depth: {deboss_depth:.1f}mm, Base thickness: {base_thickness:.1f}mm, Total plaque: {deboss_surface:.1f}mm")
+                    scale_x = WALL_WIDTH  / mesh_extents[0]
+                    scale_y = WALL_HEIGHT / mesh_extents[1]
+                    mesh.vertices[:, 0] *= scale_x
+                    mesh.vertices[:, 1] *= scale_y
+                    # Z resta intatta (4.0mm totali)
+                    print(f"[Deckbox] Fixed scale: X={scale_x:.4f}, Y={scale_y:.4f} -> {WALL_WIDTH:.2f} x {WALL_HEIGHT:.2f} mm")
+                    print(f"[Deckbox] Wall: {deboss_surface:.1f}mm total ({base_thickness:.1f}mm base + {deboss_depth:.1f}mm deboss)")
                     
                     # 2. Rotazione: ruota di 90° attorno all'asse X per mettere la mesh in piedi
                     rot_matrix = tf.rotation_matrix(np.pi / 2, [1, 0, 0])
                     mesh.apply_transform(rot_matrix)
                     
-                    # 3. Allineamento Frontale a Filo (Flush Back-Alignment)
+                    # 3. Posizionamento: Wall Replacement con overlap di 0.2mm sui bordi
                     box_min = box_mesh.bounds[0]
                     box_max = box_mesh.bounds[1]
                     mesh_min = mesh.bounds[0]
                     mesh_max = mesh.bounds[1]
                     mesh_center = (mesh_min + mesh_max) / 2.0
-                    art_thickness = mesh_max[1] - mesh_min[1]  # Spessore totale della targa (asse Y dopo rotazione)
+                    art_thickness = mesh_max[1] - mesh_min[1]
                     
+                    # Centro X/Z della scatola, con 0.2mm di overlap sui bordi
                     target_x = (box_min[0] + box_max[0]) / 2.0
-                    # Retro della targa a filo con la faccia frontale + 0.05mm di micro-saldatura
-                    target_y = box_min[1] - 0.05
                     target_z = (box_min[2] + box_max[2]) / 2.0
+                    
+                    # Y: fronte della targa a filo con l'esterno della scatola
+                    # Il retro (mesh_min[1] dopo traslazione) entra dentro il buco
+                    target_y = box_min[1] - art_thickness + 0.2  # 0.2mm compenetrazione per saldatura
                     
                     translation = [
                         target_x - mesh_center[0],
@@ -346,22 +355,11 @@ class MeshWorker(QThread):
                         target_z - mesh_center[2],
                     ]
                     mesh.apply_translation(translation)
-                    print(f"[Deckbox] Art thickness: {art_thickness:.2f}mm (base={base_thickness:.1f} inside wall, deboss={deboss_depth:.1f} protruding)")
+                    print(f"[Deckbox] Art thickness: {art_thickness:.2f}mm")
                     print(f"[Deckbox] Translation: X={translation[0]:.2f}, Y={translation[1]:.2f}, Z={translation[2]:.2f}")
                     
-                    # 4. Boolean Difference: scava la sagoma dell'art dentro il muro della scatola
-                    self.progress.emit(92, "Boolean Difference (carving art into box wall)...")
-                    t_bool_start = time.time()
-                    try:
-                        subtracted_box = trimesh.boolean.difference([box_mesh, mesh])
-                        t_bool_end = time.time()
-                        print(f"[Deckbox] Boolean difference completed in {t_bool_end - t_bool_start:.2f}s")
-                        
-                        # 5. Concatenazione finale: scatola bucata + targa art
-                        mesh = trimesh.util.concatenate([subtracted_box, mesh])
-                    except Exception as e:
-                        print(f"Warning: Boolean difference failed ({e}), falling back to simple concatenation")
-                        mesh = trimesh.util.concatenate([box_mesh, mesh])
+                    # 4. Concatenazione: incolla la parete art sul template aperto
+                    mesh = trimesh.util.concatenate([box_mesh, mesh])
                 else:
                     print(f"Warning: Deckbox template not found at {template_path}")
             
