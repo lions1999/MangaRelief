@@ -95,8 +95,9 @@ def extract_dominant_colors(image_rgb: np.ndarray, n_colors: int = 5) -> list:
     return [tuple(c) for c in sorted_colors]
 
 def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list, 
-                      base_z: float = 1.0, total_z: float = 2.4, max_dim: float = 100.0):
-    """Genera una mesh a terrazze basata sui colori forniti."""
+                      base_z: float = 1.0, total_z: float = 2.4, 
+                      max_dim: float = 100.0, layer_height: float = 0.2):
+    """Genera una mesh a terrazze basata sui colori forniti, quantizzata sui layer di stampa."""
     # Pre-scaling a 800px per performance e pulizia stampa
     h, w = image_rgb.shape[:2]
     max_size = 800
@@ -108,7 +109,29 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
         h, w = image_rgb.shape[:2]
 
     n_colors = len(sorted_colors_rgb)
-    layer_step = (total_z - base_z) / (n_colors - 1) if n_colors > 1 else 0
+    
+    # --- LOGICA DI QUANTIZZAZIONE LAYER ---
+    base_layers = int(round(base_z / layer_height))
+    total_layers = int(round(total_z / layer_height))
+    remaining_layers = total_layers - base_layers
+
+    # Distribuisci i layer rimanenti tra i colori (escluso il colore di base)
+    exact_z_heights = [round(base_layers * layer_height, 3)]
+    if n_colors > 1 and remaining_layers > 0:
+        base_dist = remaining_layers // (n_colors - 1)
+        remainder = remaining_layers % (n_colors - 1)
+        layers_per_color = [base_dist] * (n_colors - 1)
+        # Distribuisce i layer extra ai primi colori (quelli più bassi/scuri)
+        for i in range(remainder):
+            layers_per_color[i] += 1
+            
+        current_l = base_layers
+        for layers in layers_per_color:
+            current_l += layers
+            exact_z_heights.append(round(current_l * layer_height, 3))
+    else:
+        # Fallback se c'è un solo colore o non c'è spazio per layer extra
+        exact_z_heights = [round(base_z, 3)] * n_colors
 
     # Mappa pixel ai colori tramite cKDTree (velocissimo)
     tree = cKDTree(sorted_colors_rgb)
@@ -119,12 +142,11 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
     # Applica un filtro mediana per "compattare" le zone di colore e rimuovere il rumore (pixel isolati)
     indices = median_filter(indices, size=5)
 
-    # Costruisci heightmap discreta
+    # Costruisci heightmap discreta usando le altezze quantizzate
     Z = np.zeros((h, w), dtype=np.float32)
     for i in range(n_colors):
         mask = (indices == i)
-        # Arrotondamento per evitare problemi di precisione nello slicer
-        Z[mask] = round(base_z + (i * layer_step), 3)
+        Z[mask] = exact_z_heights[i]
 
     # Calcolo dimensioni meshgrid
     if w >= h:
@@ -466,7 +488,8 @@ class MeshWorker(QThread):
                     self.topo_colors, 
                     base_z=self.base_h, 
                     total_z=self.max_h,
-                    max_dim=self.max_dim
+                    max_dim=self.max_dim,
+                    layer_height=self.layer_height
                 )
                 self.progress.emit(80, "Optimizing Topo Mesh...")
                 

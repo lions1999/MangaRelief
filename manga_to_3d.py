@@ -548,20 +548,38 @@ class Manga3DAppController(MainWindowUI):
         is_topo = (self.mode_selector.currentIndex() == 1)
         
         if is_topo:
-            # --- TOPOGRAPHIC MODE INSTRUCTIONS ---
+            # --- TOPOGRAPHIC MODE INSTRUCTIONS (Quantized) ---
             base_z = self.spin_base.value()
             total_z = self.spin_maxh.value()
+            layer_h = self.spin_layer_height.value()
             n_colors = self.topo_color_list.count()
-            layer_step = (total_z - base_z) / (n_colors - 1) if n_colors > 1 else 0
             
-            color_lines = "🎨 TOPOGRAPHIC FILAMENT STEPS:\n"
+            base_layers = int(round(base_z / layer_h))
+            total_layers = int(round(total_z / layer_h))
+            remaining_layers = total_layers - base_layers
+            
+            exact_z_heights = [round(base_layers * layer_h, 3)]
+            if n_colors > 1 and remaining_layers > 0:
+                base_dist = remaining_layers // (n_colors - 1)
+                remainder = remaining_layers % (n_colors - 1)
+                layers_per_color = [base_dist] * (n_colors - 1)
+                for j in range(remainder):
+                    layers_per_color[j] += 1
+                
+                curr_l = base_layers
+                for layers in layers_per_color:
+                    curr_l += layers
+                    exact_z_heights.append(round(curr_l * layer_h, 3))
+            else:
+                exact_z_heights = [round(base_z, 3)] * n_colors
+            
+            color_lines = "🎨 TOPOGRAPHIC FILAMENT STEPS (Quantized):\n"
             for i in range(n_colors):
                 rgb = self.topo_color_list.item(i).data(Qt.ItemDataRole.UserRole)
                 if i == 0:
-                    color_lines += f"  • Start with: RGB{rgb} (Base Layer)\n"
+                    color_lines += f"  • Start with: RGB{rgb} (Base up to {exact_z_heights[0]}mm)\n"
                 else:
-                    z_pause = round(base_z + (i * layer_step), 2)
-                    color_lines += f"  • at Z = {z_pause} mm  →  Switch to RGB{rgb}\n"
+                    color_lines += f"  • at Z = {exact_z_heights[i]} mm  →  Switch to RGB{rgb}\n"
         else:
             # --- STANDARD RELIEF INSTRUCTIONS ---
             mode = getattr(self, 'color_mode_state', 4)
