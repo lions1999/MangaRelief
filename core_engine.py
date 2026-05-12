@@ -1,4 +1,8 @@
 import os
+from sklearn.cluster import KMeans
+from scipy.spatial import cKDTree
+from PIL import Image
+
 import io
 import zipfile
 import cv2
@@ -71,6 +75,69 @@ def create_solid_mesh(X, Y, Z, bottom_z=0.0):
     all_faces = np.vstack((faces_top, faces_bottom, top_sides, bot_sides, left_sides, right_sides))
     
     return trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
+
+# ---------------------------------------------------------------------------
+# TOPOGRAPHIC COLOR MODE (K-Means & Terrace Generation)
+# ---------------------------------------------------------------------------
+def extract_dominant_colors(image_rgb: np.ndarray, n_colors: int = 5) -> list:
+    """Estrae i colori dominanti e li ordina per luminosità (dal più scuro al più chiaro)."""
+    pixels = image_rgb.reshape(-1, 3)
+    # n_init='auto' per sopprimere warning e velocizzare
+    kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init='auto').fit(pixels)
+    colors = kmeans.cluster_centers_.astype(int)
+    
+    # Ordina i colori per luminosità percepita (Luminance)
+    luminances = [0.299*c[0] + 0.587*c[1] + 0.114*c[2] for c in colors]
+    sorted_indices = np.argsort(luminances)
+    sorted_colors = colors[sorted_indices]
+    
+    return [tuple(c) for c in sorted_colors]
+
+def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list, 
+                      base_z: float = 1.0, total_z: float = 2.4, max_dim: float = 100.0):
+    """Genera una mesh a terrazze basata sui colori forniti."""
+    # Pre-scaling a 800px per performance e pulizia stampa
+    h, w = image_rgb.shape[:2]
+    max_size = 800
+    if max(h, w) > max_size:
+        scale = max_size / max(h, w)
+        new_w, new_h = int(w * scale), int(h * scale)
+        img_pil = Image.fromarray(image_rgb).resize((new_w, new_h), Image.Resampling.LANCZOS)
+        image_rgb = np.array(img_pil)
+        h, w = image_rgb.shape[:2]
+
+    n_colors = len(sorted_colors_rgb)
+    layer_step = (total_z - base_z) / (n_colors - 1) if n_colors > 1 else 0
+
+    # Mappa pixel ai colori tramite cKDTree (velocissimo)
+    tree = cKDTree(sorted_colors_rgb)
+    pixels_flat = image_rgb.reshape(-1, 3)
+    _, indices = tree.query(pixels_flat)
+    indices = indices.reshape(h, w)
+
+    # Costruisci heightmap discreta
+    Z = np.zeros((h, w), dtype=np.float32)
+    for i in range(n_colors):
+        mask = (indices == i)
+        # Arrotondamento per evitare problemi di precisione nello slicer
+        Z[mask] = round(base_z + (i * layer_step), 3)
+
+    # Calcolo dimensioni meshgrid
+    if w >= h:
+        dim_x = float(max_dim)
+        dim_y = float(max_dim) * (h / w)
+    else:
+        dim_y = float(max_dim)
+        dim_x = float(max_dim) * (w / h)
+
+    x = np.linspace(0, dim_x, w)
+    y = np.linspace(0, dim_y, h)[::-1]
+    X, Y = np.meshgrid(x, y)
+
+    # Generazione Mesh tramite la utility interna
+    mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0)
+    return mesh
+
 
 # ---------------------------------------------------------------------------
 # .3MF EXPORT  —  Hybrid: Trimesh geometry + Bambu Studio metadata injection

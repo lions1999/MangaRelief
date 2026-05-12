@@ -38,7 +38,20 @@ def main(image_path):
     output_path = "debug_posterized.png"
     posterized_img.save(output_path)
     print(f"\n[SUCCESSO] Immagine di debug salvata in: {output_path}")
-    print("Controlla l'immagine per verificare la presenza di rumore, artefatti o bordi spuri!")
+    
+    print("\nGenerazione Mesh 3D a terrazze...")
+    from core_engine import extract_dominant_colors, process_mesh_topo
+    
+    # Estrae e ordina
+    ordered_colors = extract_dominant_colors(pixels, 5)
+    
+    # Genera mesh
+    mesh = process_mesh_topo(pixels, ordered_colors, base_z=1.0, total_z=2.4)
+    
+    stl_path = "debug_topo_mesh.stl"
+    mesh.export(stl_path)
+    print(f"[SUCCESSO] STL di test salvato in: {stl_path}")
+    print("Controlla l'immagine e la mesh per verificare la presenza di rumore, artefatti o bordi spuri!")
 
 if __name__ == "__main__":
     # Sostituisci "metroid.jpg" con il nome reale di una tua immagine di test se non passi argomenti
