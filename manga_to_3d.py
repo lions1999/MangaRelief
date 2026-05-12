@@ -9,6 +9,7 @@ import ctypes
 
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QListWidgetItem
 from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt
 
 from utils import resource_path
 from ui_main_window import MainWindowUI
@@ -61,10 +62,21 @@ class Manga3DAppController(MainWindowUI):
         self.slider_threshold.valueChanged.connect(self._on_threshold_changed)
         self.chk_auto_z.toggled.connect(self._on_auto_z_toggled)
         self.chk_auto_midtones.toggled.connect(self._on_auto_midtones_toggled)
+        self.mode_selector.currentIndexChanged.connect(self._update_viewport_mode)
         
         self.spin_base.valueChanged.connect(self._on_physical_param_changed)
         self.spin_maxh.valueChanged.connect(self._on_physical_param_changed)
         self.spin_layer_height.valueChanged.connect(self._on_physical_param_changed)
+
+    def _update_viewport_mode(self, index):
+        """Switch viewport display between Color and Grayscale based on selected mode."""
+        if getattr(self, 'img_filtered_array', None) is None:
+            return
+            
+        if index == 1: # Topographic Mode
+            self.viewer.setImage(self.img_rgb_filtered)
+        else: # Standard Mode
+            self.viewer.setImage(self.img_filtered_array)
 
     def _on_threshold_changed(self, value):
         self.lbl_threshold.setText(f"Halftone Threshold: {value}%")
@@ -212,15 +224,20 @@ class Manga3DAppController(MainWindowUI):
             self.lbl_status.setText("Loading Failed.")
             return
 
-        h, w = img.shape
-        self.lbl_info.setText(f"Preview HD: {w} × {h} px\n{os.path.basename(file_path)}")
-        
-        # Filtro CV2
+        # Apply bilateral filter to both for consistency in preview
         self.lbl_status.setText("🛠 Applying Bilateral Filter...")
         QApplication.processEvents()
         self.img_filtered_array = cv2.bilateralFilter(img, d=5, sigmaColor=50, sigmaSpace=50)
-        
-        self.viewer.setImage(self.img_filtered_array)
+        self.img_rgb_filtered = cv2.bilateralFilter(self.img_rgb_original, d=5, sigmaColor=50, sigmaSpace=50)
+
+        # Display correct version based on mode
+        if self.mode_selector.currentIndex() == 1: # Topo
+            self.viewer.setImage(self.img_rgb_filtered)
+        else:
+            self.viewer.setImage(self.img_filtered_array)
+
+        h, w = img.shape
+        self.lbl_info.setText(f"Preview HD: {w} × {h} px\n{os.path.basename(file_path)}")
         self.btn_generate.setEnabled(True)
 
         if self.img_filtered_array is None:

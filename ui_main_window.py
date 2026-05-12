@@ -28,11 +28,24 @@ class ImageGraphicsView(QGraphicsView):
         self.pan_start_pos = None
 
     def setImage(self, img_filtered_array):
-        h, w = img_filtered_array.shape
+        if img_filtered_array is None:
+            return
+            
+        if len(img_filtered_array.shape) == 3:
+            h, w, c = img_filtered_array.shape
+            fmt = QImage.Format.Format_RGB888
+            # OpenCV usa BGR, PyQt vuole RGB. Se l'array viene da OpenCV, convertiamolo.
+            # Ma nel nostro caso lo carichiamo già come RGB o lo convertiamo prima di passarlo.
+            bytes_per_line = c * w
+        else:
+            h, w = img_filtered_array.shape
+            fmt = QImage.Format.Format_Grayscale8
+            bytes_per_line = w
+
         if not img_filtered_array.flags['C_CONTIGUOUS']:
             img_filtered_array = np.ascontiguousarray(img_filtered_array)
             
-        qimage = QImage(img_filtered_array.data, w, h, w, QImage.Format.Format_Grayscale8)
+        qimage = QImage(img_filtered_array.data, w, h, bytes_per_line, fmt)
         pixmap = QPixmap.fromImage(qimage)
         self.pixmap_item.setPixmap(pixmap)
         
