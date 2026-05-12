@@ -7,11 +7,12 @@ from PIL import Image
 import pillow_heif
 import ctypes
 
-from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QListWidgetItem
+from PyQt6.QtGui import QColor
 
 from utils import resource_path
 from ui_main_window import MainWindowUI
-from core_engine import MeshWorker, suggest_midtones
+from core_engine import MeshWorker, suggest_midtones, extract_dominant_colors
 
 # Abilitiamo i plugin HEIF e AVIF in caso di fallimento OpenCV
 try:
@@ -56,6 +57,7 @@ class Manga3DAppController(MainWindowUI):
             btn.clicked.connect(lambda checked, idx=i: self.set_active_swatch(idx))
             
         self.btn_auto_white.clicked.connect(self._apply_auto_white)
+        self.btn_extract_topo.clicked.connect(self._extract_topo_colors)
         self.slider_threshold.valueChanged.connect(self._on_threshold_changed)
         self.chk_auto_z.toggled.connect(self._on_auto_z_toggled)
         self.chk_auto_midtones.toggled.connect(self._on_auto_midtones_toggled)
@@ -179,27 +181,31 @@ class Manga3DAppController(MainWindowUI):
     def load_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open Image File",
-            self.last_opened_dir,   # start in last-used folder
+            self.last_opened_dir,
             "Images (*.png *.jpg *.jpeg *.jfif *.avif *.webp *.bmp *.tiff *.heic);;All Files (*.*)"
         )
         if not file_path:
             return
 
-        # Remember this folder for next time
         self.last_opened_dir = os.path.dirname(file_path)
         self.loaded_image_path = file_path
         self.lbl_status.setText("Caricamento immagine...")
         QApplication.processEvents()
         
-        img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-        if img is None:
+        # Load RGB first to avoid redundant conversions
+        img_bgr = cv2.imread(file_path)
+        if img_bgr is None:
             try:
-                pil_img = Image.open(file_path).convert('L')
-                img = np.array(pil_img)
+                pil_img = Image.open(file_path).convert('RGB')
+                self.img_rgb_original = np.array(pil_img)
+                img = np.array(pil_img.convert('L'))
             except Exception as e:
                 QMessageBox.critical(self, "Decoder Error", f"Unable to read source file:\n{e}")
                 self.lbl_status.setText("Loading Failed.")
                 return
+        else:
+            self.img_rgb_original = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
                 
         if img is None:
             QMessageBox.critical(self, "Decoder Error", "Unreadable format.")
@@ -293,6 +299,37 @@ class Manga3DAppController(MainWindowUI):
             match_name = self.swatch_labels[idx]
             self.lbl_status.setText(f"✅ Color '{match_name}' correctly assigned to value [{val}].")
 
+    def _extract_topo_colors(self):
+        """Extract dominant colors from the current image and populate the list for topo mode."""
+        if getattr(self, 'img_rgb_original', None) is None:
+            QMessageBox.warning(self, "Warning", "Please load an image first.")
+            return
+            
+        self.lbl_status.setText("🤖 Extracting dominant colors (K-Means)...")
+        QApplication.processEvents()
+        
+        try:
+            # Use the already loaded RGB image
+            colors = extract_dominant_colors(self.img_rgb_original, n_colors=5)
+            
+            self.topo_color_list.clear()
+            for i, rgb in enumerate(colors):
+                item = QListWidgetItem(f"Layer {i+1}: RGB {rgb}")
+                item.setData(Qt.ItemDataRole.UserRole, rgb)
+                
+                # Visual feedback: set background color
+                color = QColor(*rgb)
+                item.setBackground(color)
+                # Contrast text: calculate luminance for text readability
+                lum = 0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2]
+                item.setForeground(QColor(255, 255, 255) if lum < 128 else QColor(0, 0, 0))
+                
+                self.topo_color_list.addItem(item)
+                
+            self.lbl_status.setText(f"✅ Extracted {len(colors)} colors. Drag to reorder (Top=Base).")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Color extraction failed:\n{e}")
+
     def update_swatch_colors(self):
         for i, btn in enumerate(self.swatches):
             val = self.sampled_colors[i]
@@ -378,9 +415,22 @@ class Manga3DAppController(MainWindowUI):
             max_res_cap = 1200
 
         # --- Launch background QThread ---
+        is_topo = (self.mode_selector.currentIndex() == 1)
+        topo_colors = []
+        if is_topo:
+            for i in range(self.topo_color_list.count()):
+                topo_colors.append(self.topo_color_list.item(i).data(Qt.ItemDataRole.UserRole))
+            if not topo_colors:
+                QMessageBox.warning(self, "Error", "Please extract colors before generating.")
+                return
+
         self.generation_start_time = time.time()
+        
+        # In Topo mode, pass the RGB image instead of the filtered grayscale one
+        input_img = self.img_rgb_original if is_topo else self.img_filtered_array
+        
         self.worker = MeshWorker(
-            img_filtered=self.img_filtered_array,
+            img_filtered=input_img,
             sampled_values=self.sampled_colors,
             max_dim=self.spin_dim.value(),
             max_h=max_h,
@@ -395,7 +445,9 @@ class Manga3DAppController(MainWindowUI):
             black_clip=self.spin_black_clip.value(),
             color_mode=getattr(self, 'color_mode_state', 4),
             is_deckbox_mode=self.chk_deckbox_mode.isChecked(),
-            tcg_name=self.combo_tcg_select.currentText()
+            tcg_name=self.combo_tcg_select.currentText(),
+            is_topo_mode=is_topo,
+            topo_colors=topo_colors
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)

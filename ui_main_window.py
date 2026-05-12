@@ -3,9 +3,10 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel,
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
                              QSplitter, QProgressBar, QDoubleSpinBox, QSpinBox,
-                             QGroupBox, QFormLayout, QCheckBox, QSlider, QComboBox, QSizePolicy, QScrollArea)
+                             QGroupBox, QFormLayout, QCheckBox, QSlider, QComboBox, 
+                             QSizePolicy, QScrollArea, QListWidget, QListWidgetItem)
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QImage, QIcon, QPainter
+from PyQt6.QtGui import QPixmap, QImage, QIcon, QPainter, QColor
 
 from utils import resource_path
 
@@ -114,9 +115,28 @@ class MainWindowUI(QMainWindow):
         self.btn_load = QPushButton("📂 Load Manga")
         right_layout.addWidget(self.btn_load)
         
+        self.mode_selector = QComboBox()
+        self.mode_selector.addItems(["Standard Manga Relief", "Topographic Color (Single Extruder)"])
+        self.mode_selector.setStyleSheet("font-weight: bold; margin-bottom: 5px;")
+        right_layout.addWidget(self.mode_selector)
+        
         self.lbl_info = QLabel("No project opened.")
-        self.lbl_info.setStyleSheet("color: #a6adc8; margin-bottom: 20px;")
+        self.lbl_info.setStyleSheet("color: #a6adc8; margin-bottom: 10px;")
         right_layout.addWidget(self.lbl_info)
+
+        # TOPO COLOR PANEL (Hidden by default)
+        self.group_topo = QGroupBox("Topographic Color Settings")
+        topo_layout = QVBoxLayout()
+        self.btn_extract_topo = QPushButton("🎨 1. Extract Colors (K-Means)")
+        topo_layout.addWidget(self.btn_extract_topo)
+        self.topo_color_list = QListWidget()
+        self.topo_color_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.topo_color_list.setFixedHeight(130)
+        self.topo_color_list.setToolTip("Drag to reorder: Top = Bottom Layer, Bottom = Top Layer")
+        topo_layout.addWidget(self.topo_color_list)
+        self.group_topo.setLayout(topo_layout)
+        self.group_topo.setVisible(False)
+        right_layout.addWidget(self.group_topo)
         
         # SWATCH PANEL
         group_swatch = QGroupBox("Color Picking (Click to calibrate)")
@@ -286,9 +306,22 @@ class MainWindowUI(QMainWindow):
         self.lbl_status.setFixedHeight(40)
         right_layout.addWidget(self.lbl_status)
         
+        # Connect mode selector to visibility toggle
+        self.mode_selector.currentIndexChanged.connect(self._on_mode_changed)
+        
         splitter.addWidget(self.scroll_area)
         splitter.setSizes([800, 420])
         
         splitter.setHandleWidth(1)
         splitter.handle(1).setCursor(Qt.CursorShape.ArrowCursor)
         splitter.handle(1).setEnabled(False)
+        
+    def _on_mode_changed(self, index):
+        """Toggle visibility of specific panels based on the selected mode."""
+        is_topo = (index == 1)
+        self.group_topo.setVisible(is_topo)
+        
+        # Hide standard relief controls if topo is active
+        for child in self.findChildren(QGroupBox):
+            if child.title() in ["Color Picking (Click to calibrate)", "Halftone Color-Change Z (mm)"]:
+                child.setVisible(not is_topo)

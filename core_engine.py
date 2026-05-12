@@ -1,6 +1,7 @@
 import os
 from sklearn.cluster import KMeans
 from scipy.spatial import cKDTree
+from scipy.ndimage import median_filter
 from PIL import Image
 
 import io
@@ -114,6 +115,9 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
     pixels_flat = image_rgb.reshape(-1, 3)
     _, indices = tree.query(pixels_flat)
     indices = indices.reshape(h, w)
+
+    # Applica un filtro mediana per "compattare" le zone di colore e rimuovere il rumore (pixel isolati)
+    indices = median_filter(indices, size=5)
 
     # Costruisci heightmap discreta
     Z = np.zeros((h, w), dtype=np.float32)
@@ -251,7 +255,10 @@ class MeshWorker(QThread):
     finished_err = pyqtSignal(str)
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, layer_height, max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, color_mode=4, is_deckbox_mode=False, tcg_name='Yu-Gi-Oh!'):
+                 output_path, output_path_3mf, color_changes_z, layer_height, 
+                 max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, 
+                 color_mode=4, is_deckbox_mode=False, tcg_name='Yu-Gi-Oh!',
+                 is_topo_mode=False, topo_colors=None):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -269,6 +276,8 @@ class MeshWorker(QThread):
         self.color_mode = color_mode
         self.is_deckbox_mode = is_deckbox_mode
         self.tcg_name = tcg_name
+        self.is_topo_mode = is_topo_mode
+        self.topo_colors = topo_colors
         self.cancel_requested = False
         
         # Mapping TCG names to logo asset files
@@ -442,42 +451,69 @@ class MeshWorker(QThread):
             if self.cancel_requested: raise InterruptedError("Process cancelled by user")
             t_start_total = time.time()
             
-            # --- 1. Image Preparation ---
-            self.progress.emit(5, "Optimizing resolution for 3D mesh...")
-            img = self._prepare_image_data(self.img_filtered)
-            
-            # --- 2. Z-Mapping & Heightmap ---
-            self.progress.emit(20, "Applying Piecewise Interpolation (Z Mapping)...")
-            x_pts, y_pts, floor_z, surface_z = self._get_z_mapping()
-            
-            Z_flat = np.interp(img.flatten(), x_pts, y_pts)
-            Z_flat = np.round(Z_flat, 3)
-            
-            # Clamp extremes for pure black/white
-            Z_flat[img.flatten() == 255] = floor_z
-            Z_flat[img.flatten() == 0] = surface_z
-            Z = Z_flat.reshape(img.shape)
-            
-            # --- 3. Grid Generation ---
-            self.progress.emit(40, "Generazione Vertici (MeshGrid)...")
-            h, w = img.shape
-            if w >= h:
-                dim_x = float(self.max_dim)
-                dim_y = float(self.max_dim) * (h / w)
-            else:
-                dim_y = float(self.max_dim)
-                dim_x = float(self.max_dim) * (w / h)
+            if self.is_topo_mode and self.topo_colors:
+                self.progress.emit(10, "🏔 Starting Topographic Color Processing...")
+                import cv2
+                # Ensure we have RGB image for K-Means consistency
+                if isinstance(self.img_filtered, np.ndarray) and len(self.img_filtered.shape) == 2:
+                    # If passed grayscale, we convert back to RGB for the color pipeline
+                    img_rgb = cv2.cvtColor(self.img_filtered, cv2.COLOR_GRAY2RGB)
+                else:
+                    img_rgb = self.img_filtered
 
-            x = np.linspace(0, dim_x, w)
-            y = np.linspace(0, dim_y, h)[::-1]
-            X, Y = np.meshgrid(x, y)
+                mesh = process_mesh_topo(
+                    img_rgb, 
+                    self.topo_colors, 
+                    base_z=self.base_h, 
+                    total_z=self.max_h,
+                    max_dim=self.max_dim
+                )
+                self.progress.emit(80, "Optimizing Topo Mesh...")
+                
+                # In modalità Topo la mesh è già completa, saltiamo la pipeline standard
+                goto_export = True
+            else:
+                goto_export = False
+                # --- 1. Image Preparation ---
+                self.progress.emit(5, "Optimizing resolution for 3D mesh...")
+                img = self._prepare_image_data(self.img_filtered)
             
-            if self.is_deckbox_mode:
-                # Add 2mm border logic using constants
-                bx = 2.0 * (dim_x / DeckboxConfig.WALL_WIDTH)
-                by = 2.0 * (dim_y / DeckboxConfig.WALL_HEIGHT)
-                b_mask = (X < bx) | (X > dim_x - bx) | (Y < by) | (Y > dim_y - by)
-                Z[b_mask] = surface_z
+            if not goto_export:
+                # --- 2. Z-Mapping & Heightmap ---
+                self.progress.emit(20, "Applying Piecewise Interpolation (Z Mapping)...")
+                x_pts, y_pts, floor_z, surface_z = self._get_z_mapping()
+                
+                Z_flat = np.interp(img.flatten(), x_pts, y_pts)
+                Z_flat = np.round(Z_flat, 3)
+                
+                # Clamp extremes for pure black/white
+                Z_flat[img.flatten() <= self.black_clip] = surface_z
+                Z_flat[img.flatten() >= self.white_clip] = floor_z
+                
+                h, w = img.shape
+                Z = Z_flat.reshape((h, w))
+                
+                # --- 3. Grid & Geometry ---
+                if w >= h:
+                    dim_x = float(self.max_dim)
+                    dim_y = float(self.max_dim) * (h / w)
+                else:
+                    dim_y = float(self.max_dim)
+                    dim_x = float(self.max_dim) * (w / h)
+                
+                x = np.linspace(0, dim_x, w)
+                y = np.linspace(0, dim_y, h)[::-1]
+                X, Y = np.meshgrid(x, y)
+                
+                self.progress.emit(40, "Generating solid vertices (Watertight)...")
+                mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0)
+                
+                if self.is_deckbox_mode:
+                    # Add 2mm border logic using constants
+                    bx = 2.0 * (dim_x / DeckboxConfig.WALL_WIDTH)
+                    by = 2.0 * (dim_y / DeckboxConfig.WALL_HEIGHT)
+                    b_mask = (X < bx) | (X > dim_x - bx) | (Y < by) | (Y > dim_y - by)
+                    Z[b_mask] = surface_z
             
             # --- 4. Mesh Assembly ---
             self.progress.emit(55, "Creating 3D Geometry...")
