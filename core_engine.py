@@ -516,8 +516,7 @@ class MeshWorker(QThread):
                     Z[b_mask] = surface_z
             
             # --- 4. Mesh Assembly ---
-            self.progress.emit(55, "Creating 3D Geometry...")
-            mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0)
+            self.progress.emit(55, "Finalizing Geometry...")
             
             if self.is_deckbox_mode:
                 self.progress.emit(91, "Assembling Deckbox (Wall Replacement)...")

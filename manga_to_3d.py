@@ -545,23 +545,45 @@ class Manga3DAppController(MainWindowUI):
         z3 = self.spin_z3.value()
 
         # Build color-change instructions based on detected mode
-        mode = getattr(self, 'color_mode_state', 4)
-        if mode == 4:
-            color_lines = (
-                f"  • L1 Light Gray  →  Z = {z1} mm  (Filament 2)\n"
-                f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 3)\n"
-                f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 4)\n"
-            )
-        elif mode == 3:
-            color_lines = (
-                f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 2)\n"
-                f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 3)\n"
-            )
-        else: # mode == 2
-            # 2-color mode: only show L3
-            color_lines = (
-                f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 2)\n"
-            )
+        is_topo = (self.mode_selector.currentIndex() == 1)
+        
+        if is_topo:
+            # --- TOPOGRAPHIC MODE INSTRUCTIONS ---
+            base_z = self.spin_base.value()
+            total_z = self.spin_maxh.value()
+            n_colors = self.topo_color_list.count()
+            layer_step = (total_z - base_z) / (n_colors - 1) if n_colors > 1 else 0
+            
+            color_lines = "🎨 TOPOGRAPHIC FILAMENT STEPS:\n"
+            for i in range(n_colors):
+                rgb = self.topo_color_list.item(i).data(Qt.ItemDataRole.UserRole)
+                if i == 0:
+                    color_lines += f"  • Start with: RGB{rgb} (Base Layer)\n"
+                else:
+                    z_pause = round(base_z + (i * layer_step), 2)
+                    color_lines += f"  • at Z = {z_pause} mm  →  Switch to RGB{rgb}\n"
+        else:
+            # --- STANDARD RELIEF INSTRUCTIONS ---
+            mode = getattr(self, 'color_mode_state', 4)
+            z1 = self.spin_z1.value()
+            z2 = self.spin_z2.value()
+            z3 = self.spin_z3.value()
+            
+            if mode == 4:
+                color_lines = (
+                    f"  • L1 Light Gray  →  Z = {z1} mm  (Filament 2)\n"
+                    f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 3)\n"
+                    f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 4)\n"
+                )
+            elif mode == 3:
+                color_lines = (
+                    f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 2)\n"
+                    f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 3)\n"
+                )
+            else: # mode == 2
+                color_lines = (
+                    f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 2)\n"
+                )
 
         msg = "Files saved:\n"
         if stl_path:
