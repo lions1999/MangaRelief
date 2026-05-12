@@ -285,6 +285,15 @@ class MeshWorker(QThread):
             y = np.linspace(0, dim_y_mm, height_pixel)[::-1]
             X, Y = np.meshgrid(x, y)
             
+            if self.is_deckbox_mode:
+                # Add 2mm border to the front plaque
+                # Coordinates are scaled back to match the final 78.14 x 98.0 mm dimensions
+                border_x = 2.0 * (dim_x_mm / 78.14)
+                border_y = 2.0 * (dim_y_mm / 98.0)
+                border_mask = (X < border_x) | (X > dim_x_mm - border_x) | \
+                              (Y < border_y) | (Y > dim_y_mm - border_y)
+                Z[border_mask] = deboss_surface
+            
             self.progress.emit(55, "Creazione Facce...")
             vertices_top = np.column_stack((X.ravel(), Y.ravel(), Z.ravel()))
             idx = np.arange(w * h).reshape((h, w))
