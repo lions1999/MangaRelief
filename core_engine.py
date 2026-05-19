@@ -345,8 +345,11 @@ class MeshWorker(QThread):
         if self.is_deckbox_mode:
             deboss_depth = DeckboxConfig.DEBOSS_DEPTH
             base_thickness = DeckboxConfig.BASE_THICKNESS
-            deboss_floor = base_thickness
-            deboss_surface = base_thickness + deboss_depth
+            
+            # FIX: La superficie esterna è a filo col muro, il fondo scava all'interno
+            deboss_surface = base_thickness
+            # Inseriamo un max() di sicurezza per non bucare mai del tutto la scatola
+            deboss_floor = max(0.6, base_thickness - deboss_depth)
             
             relief_range = self.max_h - self.base_h
             L1_ratio = (L1_Z - self.base_h) / relief_range if relief_range > 0 else 0.33
