@@ -204,6 +204,20 @@ class MeshWorker(QThread):
             except Exception as e:
                 print(f"Warning: Logo engraving failed ({e})")
         
+        # Decimate lid mesh if needed (same logic as main mesh)
+        if self.smart_decimate and len(lid_mesh.faces) > 200_000:
+            self.progress.emit(98, "Optimizing Lid Mesh (Decimation)...")
+            target = 100_000 + min(50_000, int((len(lid_mesh.faces) - 200_000) * 0.05))
+            v_out, f_out = fast_simplification.simplify(
+                lid_mesh.vertices.astype(np.float64),
+                lid_mesh.faces.astype(np.int64),
+                target_count=target, agg=6.0
+            )
+            lid_mesh = trimesh.Trimesh(vertices=v_out, faces=f_out, process=False)
+            trimesh.repair.fix_normals(lid_mesh)
+            if not lid_mesh.is_watertight:
+                trimesh.repair.fill_holes(lid_mesh)
+
         lid_custom_path = os.path.join(out_dir, "deckbox_lid_custom.3mf")
         export_3mf(lid_mesh, lid_custom_path, self.color_changes_z)
         if self.output_path:
