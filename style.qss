@@ -77,3 +77,30 @@ QScrollArea {
     border: none;
     background-color: #1e1e2e;
 }
+QComboBox#mode_selector {
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+QLabel#lbl_info {
+    color: #a6adc8;
+    margin-bottom: 10px;
+}
+QLabel#lbl_real_midtones {
+    color: #aaaaaa;
+    font-style: italic;
+}
+QComboBox#combo_tcg_select {
+    font-weight: bold;
+    padding: 4px 8px;
+    min-height: 22px;
+}
+QPushButton#btn_generate[state="ready"] {
+    background-color: #f38ba8;
+    color: #11111b;
+    font-weight: bold;
+}
+QPushButton#btn_generate[state="cancel"] {
+    background-color: #f38ba8;
+    color: #11111b;
+    font-weight: bold;
+}

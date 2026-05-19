@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+# pyrefly: ignore [missing-import]
 import cv2
 import numpy as np
 from PIL import Image
@@ -350,22 +351,15 @@ class Manga3DAppController(MainWindowUI):
     def update_swatch_colors(self):
         for i, btn in enumerate(self.swatches):
             val = self.sampled_colors[i]
-            # Aggiunge visivamente il numero catturato testualmente sul pulsante!
             btn.setText(f"{self.swatch_labels[i]} : [ {val} ]")
             
-            # Dark theme adaptation
-            style = f"background-color: rgb({val},{val},{val}); "
-            if val < 130:
-                style += "color: #ffffff; border: 1px solid #7f849c;"
-            else:
-                style += "color: #11111b; border: 1px solid #45475a;"
+            r = g = b = val
+            text_color = "white" if val < 128 else "black"
+            btn.setStyleSheet(f"background-color: rgb({r},{g},{b}); color: {text_color};")
             
-            # Se ha una classe diversa da "swatch", aggiungiamo il bordo pink per indicare active overridando
-            current_class = btn.property("class")
-            if current_class == "swatch swatch_active":
-                style += "border: 2px solid #f38ba8;"
-                
-            btn.setStyleSheet(style)
+            # Refresh styles
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
 
     def generate_stl(self):
         if self.img_filtered_array is None or getattr(self, 'loaded_image_path', None) is None:
@@ -461,7 +455,7 @@ class Manga3DAppController(MainWindowUI):
             white_clip=self.spin_white_clip.value(),
             black_clip=self.spin_black_clip.value(),
             color_mode=getattr(self, 'color_mode_state', 4),
-            is_deckbox_mode=(self.mode_selector.currentIndex() == 2),
+            is_deckbox_mode=self.chk_deckbox_mode.isChecked(),
             tcg_name=self.combo_tcg_select.currentText(),
             is_topo_mode=is_topo,
             topo_colors=topo_colors
@@ -492,7 +486,7 @@ class Manga3DAppController(MainWindowUI):
         self.spin_black_clip.setEnabled(not disabled)
         self.chk_export_3mf.setEnabled(not disabled)
         self.chk_export_stl.setEnabled(not disabled)
-        self.mode_selector.setEnabled(not disabled)
+        self.chk_deckbox_mode.setEnabled(not disabled)
         self.combo_tcg_select.setEnabled(not disabled)
         
         if not self.chk_auto_z.isChecked():
@@ -502,7 +496,9 @@ class Manga3DAppController(MainWindowUI):
 
         if disabled:
             self.btn_generate.setText("🛑 Cancel")
-            self.btn_generate.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold;")
+            self.btn_generate.setProperty("state", "cancel")
+            self.btn_generate.style().unpolish(self.btn_generate)
+            self.btn_generate.style().polish(self.btn_generate)
             try:
                 self.btn_generate.clicked.disconnect()
             except TypeError:
@@ -511,7 +507,9 @@ class Manga3DAppController(MainWindowUI):
             self.btn_generate.setEnabled(True)  # Keep the cancel button interactive
         else:
             self.btn_generate.setText("🚀 Generate 3D Models")
-            self.btn_generate.setStyleSheet("")
+            self.btn_generate.setProperty("state", "")
+            self.btn_generate.style().unpolish(self.btn_generate)
+            self.btn_generate.style().polish(self.btn_generate)
             try:
                 self.btn_generate.clicked.disconnect()
             except TypeError:
@@ -523,6 +521,9 @@ class Manga3DAppController(MainWindowUI):
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.cancel_requested = True
             self.lbl_status.setText("🛑 Cancelling process, please wait...")
+            self.btn_generate.setProperty("state", "cancel")
+            self.btn_generate.style().unpolish(self.btn_generate)
+            self.btn_generate.style().polish(self.btn_generate)
             self.btn_generate.setEnabled(False)
             self.btn_generate.setText("Stopping...")
 

@@ -129,15 +129,15 @@ class MainWindowUI(QMainWindow):
         right_layout.addWidget(self.btn_load)
         
         self.mode_selector = QComboBox()
+        self.mode_selector.setObjectName("mode_selector")
         self.mode_selector.addItems(["Standard Manga Relief", "Topographic Color (Single Extruder)", "Deckbox Engraving"])
-        self.mode_selector.setStyleSheet("font-weight: bold; margin-bottom: 5px;")
         right_layout.addWidget(self.mode_selector)
         
         self.group_deckbox = QGroupBox("Deckbox Settings")
         deckbox_layout = QVBoxLayout()
         self.combo_tcg_select = QComboBox()
+        self.combo_tcg_select.setObjectName("combo_tcg_select")
         self.combo_tcg_select.addItems(["Yu-Gi-Oh!", "Pokémon", "Magic", "One Piece"])
-        self.combo_tcg_select.setStyleSheet("font-weight: bold; padding: 4px 8px;")
         deckbox_layout.addWidget(QLabel("Select TCG Game:"))
         deckbox_layout.addWidget(self.combo_tcg_select)
         self.group_deckbox.setLayout(deckbox_layout)
@@ -145,7 +145,7 @@ class MainWindowUI(QMainWindow):
         right_layout.addWidget(self.group_deckbox)
         
         self.lbl_info = QLabel("No project opened.")
-        self.lbl_info.setStyleSheet("color: #a6adc8; margin-bottom: 10px;")
+        self.lbl_info.setObjectName("lbl_info")
         right_layout.addWidget(self.lbl_info)
 
         # TOPO COLOR PANEL (Hidden by default)
@@ -269,7 +269,7 @@ class MainWindowUI(QMainWindow):
         z_layout.addRow(self.lbl_threshold, self.slider_threshold)
 
         self.lbl_real_midtones = QLabel("Image Halftones: N/A")
-        self.lbl_real_midtones.setStyleSheet("color: #aaaaaa; font-style: italic;")
+        self.lbl_real_midtones.setObjectName("lbl_real_midtones")
         z_layout.addRow("", self.lbl_real_midtones)
 
         self.lbl_z1 = QLabel("L1 Z (Light Gray):")
@@ -304,6 +304,7 @@ class MainWindowUI(QMainWindow):
         right_layout.addLayout(export_layout)
 
         self.btn_generate = QPushButton("🚀 Generate 3D Models")
+        self.btn_generate.setObjectName("btn_generate")
         self.btn_generate.setFixedHeight(50)
         self.btn_generate.setEnabled(False)
         right_layout.addWidget(self.btn_generate)
