@@ -7,8 +7,8 @@ class DeckboxConfig:
     MIN_SOLID_WALL_THICKNESS = 1.5
     
     # Lid Logo (Plug & Play)
-    PLUG_W = 60.0
+    PLUG_W = 65.0
     PLUG_H = 30.0
-    PLUG_Z = 2.0
+    PLUG_Z = 3.0
     ENGRAVE_FLOOR = 0.4
     NOTCH_Y_OFFSET = 16.818
