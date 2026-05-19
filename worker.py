@@ -189,7 +189,7 @@ class MeshWorker(QThread):
                     ly = np.linspace(0, DeckboxConfig.PLUG_H, lh)[::-1]
                     LX, LY = np.meshgrid(lx, ly)
                     
-                    logo_mesh = create_solid_mesh(LX, LY, Z_logo, bottom_z=DeckboxConfig.ENGRAVE_FLOOR)
+                    logo_mesh = create_solid_mesh(LX, LY, Z_logo, bottom_z=-0.05)
                     
                     # Alignment
                     lid_min, lid_max = lid_mesh.bounds
