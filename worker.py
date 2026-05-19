@@ -181,7 +181,8 @@ class MeshWorker(QThread):
                     
                     engrave_depth = DeckboxConfig.PLUG_Z - DeckboxConfig.ENGRAVE_FLOOR
                     logo_norm = 1.0 - (logo_img.astype(np.float64) / 255.0)  # Invert so text is engraved
-                    Z_logo = DeckboxConfig.PLUG_Z - logo_norm * engrave_depth
+                    # +0.05mm on surface to prevent Z-fighting with lid (coplanar faces)
+                    Z_logo = (DeckboxConfig.PLUG_Z + 0.05) - logo_norm * engrave_depth
                     Z_logo = np.round(Z_logo, 3)
                     
                     lh, lw = logo_img.shape
