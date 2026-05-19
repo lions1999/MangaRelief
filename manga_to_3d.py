@@ -459,7 +459,8 @@ class Manga3DAppController(MainWindowUI):
             is_deckbox_mode=(self.mode_selector.currentIndex() == 2),
             tcg_name=self.combo_tcg_select.currentText(),
             is_topo_mode=is_topo,
-            topo_colors=topo_colors
+            topo_colors=topo_colors,
+            source_image_name=base_name
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)

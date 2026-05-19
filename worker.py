@@ -20,7 +20,7 @@ class MeshWorker(QThread):
                  output_path, output_path_3mf, color_changes_z, layer_height, 
                  max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, 
                  color_mode=4, is_deckbox_mode=False, tcg_name='Yu-Gi-Oh!',
-                 is_topo_mode=False, topo_colors=None):
+                 is_topo_mode=False, topo_colors=None, source_image_name='panel'):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -40,6 +40,7 @@ class MeshWorker(QThread):
         self.tcg_name = tcg_name
         self.is_topo_mode = is_topo_mode
         self.topo_colors = topo_colors
+        self.source_image_name = source_image_name
         self.cancel_requested = False
         
         # Mapping TCG names to logo asset files
@@ -218,10 +219,10 @@ class MeshWorker(QThread):
             if not lid_mesh.is_watertight:
                 trimesh.repair.fill_holes(lid_mesh)
 
-        lid_custom_path = os.path.join(out_dir, "deckbox_lid_custom.3mf")
+        lid_custom_path = os.path.join(out_dir, f"deckbox_lid_{self.source_image_name}.3mf")
         export_3mf(lid_mesh, lid_custom_path, self.color_changes_z)
         if self.output_path:
-            lid_mesh.export(os.path.join(stl_dir, "deckbox_lid_custom.stl"))
+            lid_mesh.export(os.path.join(stl_dir, f"deckbox_lid_{self.source_image_name}.stl"))
         return lid_custom_path
 
     def run(self):
@@ -323,10 +324,10 @@ class MeshWorker(QThread):
                 stl_dir = os.path.dirname(self.output_path) if self.output_path else out_dir
                 
                 # Export Main Body
-                front_path = os.path.join(out_dir, "deckbox_custom_front.3mf")
+                front_path = os.path.join(out_dir, f"deckbox_front_{self.source_image_name}.3mf")
                 export_3mf(mesh, front_path, self.color_changes_z)
                 if self.output_path:
-                    mesh.export(os.path.join(stl_dir, "deckbox_custom_front.stl"))
+                    mesh.export(os.path.join(stl_dir, f"deckbox_front_{self.source_image_name}.stl"))
                 
                 # Export Lid
                 lid_path = self._process_lid_logo(out_dir, stl_dir)
