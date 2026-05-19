@@ -129,9 +129,20 @@ class MainWindowUI(QMainWindow):
         right_layout.addWidget(self.btn_load)
         
         self.mode_selector = QComboBox()
-        self.mode_selector.addItems(["Standard Manga Relief", "Topographic Color (Single Extruder)"])
+        self.mode_selector.addItems(["Standard Manga Relief", "Topographic Color (Single Extruder)", "Deckbox Engraving"])
         self.mode_selector.setStyleSheet("font-weight: bold; margin-bottom: 5px;")
         right_layout.addWidget(self.mode_selector)
+        
+        self.group_deckbox = QGroupBox("Deckbox Settings")
+        deckbox_layout = QVBoxLayout()
+        self.combo_tcg_select = QComboBox()
+        self.combo_tcg_select.addItems(["Yu-Gi-Oh!", "Pokémon", "Magic", "One Piece"])
+        self.combo_tcg_select.setStyleSheet("font-weight: bold; padding: 4px 8px;")
+        deckbox_layout.addWidget(QLabel("Select TCG Game:"))
+        deckbox_layout.addWidget(self.combo_tcg_select)
+        self.group_deckbox.setLayout(deckbox_layout)
+        self.group_deckbox.setVisible(False)
+        right_layout.addWidget(self.group_deckbox)
         
         self.lbl_info = QLabel("No project opened.")
         self.lbl_info.setStyleSheet("color: #a6adc8; margin-bottom: 10px;")
@@ -282,19 +293,6 @@ class MainWindowUI(QMainWindow):
 
         # BOTTOM CONTROLS
         right_layout.addSpacing(10)
-        deckbox_layout = QHBoxLayout()
-        deckbox_layout.setContentsMargins(0, 5, 0, 5)
-        self.chk_deckbox_mode = QCheckBox("Generate Deckbox")
-        self.chk_deckbox_mode.setChecked(False)
-        self.chk_deckbox_mode.setStyleSheet("font-weight: bold; color: #a6e3a1;")
-        deckbox_layout.addWidget(self.chk_deckbox_mode)
-        
-        self.combo_tcg_select = QComboBox()
-        self.combo_tcg_select.addItems(["Yu-Gi-Oh!", "Pokémon", "Magic", "One Piece"])
-        self.combo_tcg_select.setMinimumWidth(160)
-        self.combo_tcg_select.setStyleSheet("font-weight: bold; padding: 4px 8px; min-height: 22px;")
-        deckbox_layout.addWidget(self.combo_tcg_select)
-        right_layout.addLayout(deckbox_layout)
 
         export_layout = QHBoxLayout()
         self.chk_export_3mf = QCheckBox("Export .3MF")
@@ -332,9 +330,26 @@ class MainWindowUI(QMainWindow):
     def _on_mode_changed(self, index):
         """Toggle visibility of specific panels based on the selected mode."""
         is_topo = (index == 1)
+        is_deckbox = (index == 2)
+        
         self.group_topo.setVisible(is_topo)
+        self.group_deckbox.setVisible(is_deckbox)
         
         # Hide standard relief controls if topo is active
         for child in self.findChildren(QGroupBox):
             if child.title() in ["Color Picking (Click to calibrate)", "Halftone Color-Change Z (mm)"]:
                 child.setVisible(not is_topo)
+
+        # Dynamically lock physical parameters for Deckbox mode
+        if is_deckbox:
+            self.spin_dim.setEnabled(False)
+            
+            self.spin_base.setValue(4.0)
+            self.spin_base.setEnabled(False)
+            
+            self.spin_maxh.setValue(2.0)
+            self.spin_maxh.setEnabled(False)
+        else:
+            self.spin_dim.setEnabled(True)
+            self.spin_base.setEnabled(True)
+            self.spin_maxh.setEnabled(True)

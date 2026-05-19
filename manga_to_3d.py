@@ -461,7 +461,7 @@ class Manga3DAppController(MainWindowUI):
             white_clip=self.spin_white_clip.value(),
             black_clip=self.spin_black_clip.value(),
             color_mode=getattr(self, 'color_mode_state', 4),
-            is_deckbox_mode=self.chk_deckbox_mode.isChecked(),
+            is_deckbox_mode=(self.mode_selector.currentIndex() == 2),
             tcg_name=self.combo_tcg_select.currentText(),
             is_topo_mode=is_topo,
             topo_colors=topo_colors
@@ -492,7 +492,7 @@ class Manga3DAppController(MainWindowUI):
         self.spin_black_clip.setEnabled(not disabled)
         self.chk_export_3mf.setEnabled(not disabled)
         self.chk_export_stl.setEnabled(not disabled)
-        self.chk_deckbox_mode.setEnabled(not disabled)
+        self.mode_selector.setEnabled(not disabled)
         self.combo_tcg_select.setEnabled(not disabled)
         
         if not self.chk_auto_z.isChecked():
