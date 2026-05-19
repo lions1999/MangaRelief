@@ -154,8 +154,8 @@ class MeshWorker(QThread):
         mesh_min, mesh_max = mesh.bounds
         
         tx = ((box_min[0] + box_max[0]) / 2.0) - ((mesh_min[0] + mesh_max[0]) / 2.0)
-        ty = box_min[1] - mesh_min[1] + 0.1  # Micro-weld overlap
-        tz = box_min[2] - mesh_min[2]
+        ty = box_min[1] - mesh_min[1] + 0.05  # Micro-weld overlap (flush)
+        tz = box_min[2] - mesh_min[2] + 4.0   # 4mm bottom frame offset
         
         mesh.apply_translation([tx, ty, tz])
         return trimesh.util.concatenate([box_mesh, mesh])
