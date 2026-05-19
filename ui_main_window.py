@@ -298,7 +298,7 @@ class MainWindowUI(QMainWindow):
         self.chk_export_3mf = QCheckBox("Export .3MF")
         self.chk_export_3mf.setChecked(True)
         self.chk_export_stl = QCheckBox("Export .STL")
-        self.chk_export_stl.setChecked(False)
+        self.chk_export_stl.setChecked(True)
         export_layout.addWidget(self.chk_export_3mf)
         export_layout.addWidget(self.chk_export_stl)
         right_layout.addLayout(export_layout)
