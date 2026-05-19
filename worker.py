@@ -270,14 +270,8 @@ class MeshWorker(QThread):
                 
                 self.progress.emit(40, "Generating solid vertices (Watertight)...")
                 mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0)
-                
-                if self.is_deckbox_mode:
-                    # Add 2mm border logic using constants
-                    bx = 2.0 * (dim_x / DeckboxConfig.WALL_WIDTH)
-                    by = 2.0 * (dim_y / DeckboxConfig.WALL_HEIGHT)
-                    b_mask = (X < bx) | (X > dim_x - bx) | (Y < by) | (Y > dim_y - by)
-                    Z[b_mask] = surface_z
             
+                # 2mm border logic removed as requested (handled by CAD template)
             # --- 4. Mesh Assembly ---
             self.progress.emit(55, "Finalizing Geometry...")
             
