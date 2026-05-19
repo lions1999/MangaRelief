@@ -20,8 +20,9 @@ class DeckboxConfig:
     """Standard dimensions for the deckbox templates."""
     WALL_WIDTH = 78.14
     WALL_HEIGHT = 98.0
-    DEBOSS_DEPTH = 3.0
-    BASE_THICKNESS = 1.0
+    DEBOSS_DEPTH = 2.0
+    BASE_THICKNESS = 4.0
+    MIN_SOLID_WALL_THICKNESS = 1.5
     
     # Lid Logo (Plug & Play)
     PLUG_W = 60.0
@@ -346,14 +347,15 @@ class MeshWorker(QThread):
             deboss_depth = DeckboxConfig.DEBOSS_DEPTH
             base_thickness = DeckboxConfig.BASE_THICKNESS
             
-            # FIX: La superficie esterna è a filo col muro, il fondo scava all'interno
             deboss_surface = base_thickness
-            # Inseriamo un max() di sicurezza per non bucare mai del tutto la scatola
-            deboss_floor = max(0.6, base_thickness - deboss_depth)
+            # FIX: Inseriamo il limite di sicurezza basato sullo spessore residuo solido
+            deboss_floor = max(DeckboxConfig.MIN_SOLID_WALL_THICKNESS, base_thickness - deboss_depth) 
             
             relief_range = self.max_h - self.base_h
             L1_ratio = (L1_Z - self.base_h) / relief_range if relief_range > 0 else 0.33
             L2_ratio = (L2_Z - self.base_h) / relief_range if relief_range > 0 else 0.66
+            
+            # I calcoli dei layer Z scalano da deboss_floor (fondo scavo) a deboss_surface (superficie muro)
             L1_deboss = deboss_floor + L1_ratio * deboss_depth
             L2_deboss = deboss_floor + L2_ratio * deboss_depth
             
