@@ -4,3 +4,5 @@ __pycache__/
 *.exe
 *.zip
 *.mp4
+debug_*.stl
+debug_*.png
