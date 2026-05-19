@@ -139,10 +139,10 @@ class MeshWorker(QThread):
 
         box_mesh = trimesh.load(template_path)
         
-        # Fixed scale to fit the template notch
+        # Fixed scale to fit the template notch + 0.2mm overlap to prevent gaps
         mesh_extents = mesh.extents
-        scale_x = DeckboxConfig.WALL_WIDTH  / mesh_extents[0]
-        scale_y = DeckboxConfig.WALL_HEIGHT / mesh_extents[1]
+        scale_x = (DeckboxConfig.WALL_WIDTH + 0.2)  / mesh_extents[0]
+        scale_y = (DeckboxConfig.WALL_HEIGHT + 0.2) / mesh_extents[1]
         mesh.vertices[:, 0] *= scale_x
         mesh.vertices[:, 1] *= scale_y
         
@@ -185,8 +185,8 @@ class MeshWorker(QThread):
                     Z_logo = np.round(Z_logo, 3)
                     
                     lh, lw = logo_img.shape
-                    lx = np.linspace(0, DeckboxConfig.PLUG_W, lw)
-                    ly = np.linspace(0, DeckboxConfig.PLUG_H, lh)[::-1]
+                    lx = np.linspace(0, DeckboxConfig.PLUG_W + 0.2, lw)
+                    ly = np.linspace(0, DeckboxConfig.PLUG_H + 0.2, lh)[::-1]
                     LX, LY = np.meshgrid(lx, ly)
                     
                     logo_mesh = create_solid_mesh(LX, LY, Z_logo, bottom_z=-0.05)

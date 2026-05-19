@@ -8,7 +8,7 @@ class DeckboxConfig:
     
     # Lid Logo (Plug & Play)
     PLUG_W = 65.0
-    PLUG_H = 30.0
+    PLUG_H = 32.0
     PLUG_Z = 3.0
     ENGRAVE_FLOOR = 0.4
     NOTCH_Y_OFFSET = 16.818
