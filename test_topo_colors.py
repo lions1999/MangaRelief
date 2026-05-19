@@ -40,7 +40,8 @@ def main(image_path):
     print(f"\n[SUCCESSO] Immagine di debug salvata in: {output_path}")
     
     print("\nGenerazione Mesh 3D a terrazze...")
-    from core_engine import extract_dominant_colors, process_mesh_topo
+    from color_utils import extract_dominant_colors
+    from mesh_utils import process_mesh_topo
     
     # Estrae e ordina
     ordered_colors = extract_dominant_colors(pixels, 5)

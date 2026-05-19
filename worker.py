@@ -1,277 +1,16 @@
 import os
-from sklearn.cluster import KMeans
-from scipy.spatial import cKDTree
-from scipy.ndimage import median_filter
-from PIL import Image
-
-import io
-import zipfile
-import cv2
+import time
+import gc
 import numpy as np
+import cv2
 import trimesh
 import fast_simplification
-
 from PyQt6.QtCore import QThread, pyqtSignal
 
-# ---------------------------------------------------------------------------
-# CONFIGURATION & CONSTANTS
-# ---------------------------------------------------------------------------
-class DeckboxConfig:
-    """Standard dimensions for the deckbox templates."""
-    WALL_WIDTH = 78.14
-    WALL_HEIGHT = 98.0
-    DEBOSS_DEPTH = 2.0
-    BASE_THICKNESS = 4.0
-    MIN_SOLID_WALL_THICKNESS = 1.5
-    
-    # Lid Logo (Plug & Play)
-    PLUG_W = 60.0
-    PLUG_H = 30.0
-    PLUG_Z = 2.0
-    ENGRAVE_FLOOR = 0.4
-    NOTCH_Y_OFFSET = 16.818
+from config import DeckboxConfig
+from mesh_utils import create_solid_mesh, process_mesh_topo, export_3mf
+from utils import resource_path
 
-def create_solid_mesh(X, Y, Z, bottom_z=0.0):
-    """
-    Generates a solid watertight mesh from X, Y, Z meshgrids.
-    Seals the bottom and the four sides.
-    """
-    h, w = Z.shape
-    offset = w * h
-    
-    # Top vertices and faces
-    vertices_top = np.column_stack((X.ravel(), Y.ravel(), Z.ravel()))
-    idx = np.arange(w * h).reshape((h, w))
-    tl = idx[:-1, :-1].ravel()
-    tr = idx[:-1, 1:].ravel()
-    bl = idx[1:, :-1].ravel()
-    br = idx[1:, 1:].ravel()
-    faces_top = np.vstack((np.column_stack((bl, tr, tl)), np.column_stack((br, tr, bl))))
-    
-    # Bottom vertices and faces
-    vertices_bottom = np.column_stack((X.ravel(), Y.ravel(), np.full_like(Z.ravel(), bottom_z)))
-    tl_b = tl + offset
-    tr_b = tr + offset
-    bl_b = bl + offset
-    br_b = br + offset
-    faces_bottom = np.vstack((np.column_stack((tl_b, tr_b, bl_b)), np.column_stack((bl_b, tr_b, br_b))))
-    
-    # Side faces (Sealing edges)
-    # Top edge
-    v1, v2 = idx[0, :-1], idx[0, 1:]
-    top_sides = np.vstack((np.column_stack((v1, v2, v1 + offset)), np.column_stack((v2, v2 + offset, v1 + offset))))
-    
-    # Bottom edge
-    v1, v2 = idx[-1, :-1], idx[-1, 1:]
-    bot_sides = np.vstack((np.column_stack((v2, v1, v1 + offset)), np.column_stack((v2 + offset, v2, v1 + offset))))
-    
-    # Left edge
-    v1, v2 = idx[:-1, 0], idx[1:, 0]
-    left_sides = np.vstack((np.column_stack((v1, v2, v1 + offset)), np.column_stack((v2, v2 + offset, v1 + offset))))
-    
-    # Right edge
-    v1, v2 = idx[:-1, -1], idx[1:, -1]
-    right_sides = np.vstack((np.column_stack((v2, v1, v1 + offset)), np.column_stack((v2 + offset, v2, v1 + offset))))
-    
-    all_vertices = np.vstack((vertices_top, vertices_bottom))
-    all_faces = np.vstack((faces_top, faces_bottom, top_sides, bot_sides, left_sides, right_sides))
-    
-    return trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
-
-# ---------------------------------------------------------------------------
-# TOPOGRAPHIC COLOR MODE (K-Means & Terrace Generation)
-# ---------------------------------------------------------------------------
-def extract_dominant_colors(image_rgb: np.ndarray, n_colors: int = 5) -> list:
-    """Estrae i colori dominanti e li ordina per luminosità (dal più scuro al più chiaro)."""
-    pixels = image_rgb.reshape(-1, 3)
-    # n_init='auto' per sopprimere warning e velocizzare
-    kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init='auto').fit(pixels)
-    colors = kmeans.cluster_centers_.astype(int)
-    
-    # Ordina i colori per luminosità percepita (Luminance)
-    luminances = [0.299*c[0] + 0.587*c[1] + 0.114*c[2] for c in colors]
-    sorted_indices = np.argsort(luminances)
-    sorted_colors = colors[sorted_indices]
-    
-    return [tuple(c) for c in sorted_colors]
-
-def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list, 
-                      base_z: float = 1.0, total_z: float = 2.4, 
-                      max_dim: float = 100.0, layer_height: float = 0.2):
-    """Genera una mesh a terrazze basata sui colori forniti, quantizzata sui layer di stampa."""
-    # Pre-scaling a 800px per performance e pulizia stampa
-    h, w = image_rgb.shape[:2]
-    max_size = 800
-    if max(h, w) > max_size:
-        scale = max_size / max(h, w)
-        new_w, new_h = int(w * scale), int(h * scale)
-        img_pil = Image.fromarray(image_rgb).resize((new_w, new_h), Image.Resampling.LANCZOS)
-        image_rgb = np.array(img_pil)
-        h, w = image_rgb.shape[:2]
-
-    n_colors = len(sorted_colors_rgb)
-    
-    # --- LOGICA DI QUANTIZZAZIONE LAYER ---
-    base_layers = int(round(base_z / layer_height))
-    total_layers = int(round(total_z / layer_height))
-    remaining_layers = total_layers - base_layers
-
-    # Distribuisci i layer rimanenti tra i colori (escluso il colore di base)
-    exact_z_heights = [round(base_layers * layer_height, 3)]
-    if n_colors > 1 and remaining_layers > 0:
-        base_dist = remaining_layers // (n_colors - 1)
-        remainder = remaining_layers % (n_colors - 1)
-        layers_per_color = [base_dist] * (n_colors - 1)
-        # Distribuisce i layer extra ai primi colori (quelli più bassi/scuri)
-        for i in range(remainder):
-            layers_per_color[i] += 1
-            
-        current_l = base_layers
-        for layers in layers_per_color:
-            current_l += layers
-            exact_z_heights.append(round(current_l * layer_height, 3))
-    else:
-        # Fallback se c'è un solo colore o non c'è spazio per layer extra
-        exact_z_heights = [round(base_z, 3)] * n_colors
-
-    # Mappa pixel ai colori tramite cKDTree (velocissimo)
-    tree = cKDTree(sorted_colors_rgb)
-    pixels_flat = image_rgb.reshape(-1, 3)
-    _, indices = tree.query(pixels_flat)
-    indices = indices.reshape(h, w)
-
-    # Applica un filtro mediana per "compattare" le zone di colore e rimuovere il rumore (pixel isolati)
-    indices = median_filter(indices, size=5)
-
-    # Costruisci heightmap discreta usando le altezze quantizzate
-    Z = np.zeros((h, w), dtype=np.float32)
-    for i in range(n_colors):
-        mask = (indices == i)
-        Z[mask] = exact_z_heights[i]
-
-    # Calcolo dimensioni meshgrid
-    if w >= h:
-        dim_x = float(max_dim)
-        dim_y = float(max_dim) * (h / w)
-    else:
-        dim_y = float(max_dim)
-        dim_x = float(max_dim) * (w / h)
-
-    x = np.linspace(0, dim_x, w)
-    y = np.linspace(0, dim_y, h)[::-1]
-    X, Y = np.meshgrid(x, y)
-
-    # Generazione Mesh tramite la utility interna
-    mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0)
-    return mesh
-
-
-# ---------------------------------------------------------------------------
-# .3MF EXPORT  —  Hybrid: Trimesh geometry + Bambu Studio metadata injection
-# ---------------------------------------------------------------------------
-
-_SLICE_INFO = """\
-<?xml version="1.0" encoding="UTF-8"?>
-<config>
-  <header>
-    <header_item key="X-BBL-Client-Type" value="slicer"/>
-    <header_item key="X-BBL-Client-Version" value="02.06.00.51"/>
-  </header>
-</config>"""
-
-_CUSTOM_GCODE_TPL = """\
-<?xml version="1.0" encoding="utf-8"?>
-<custom_gcodes_per_layer>
-<plate>
-<plate_info id="1"/>
-{layer_nodes}<mode value="MultiAsSingle"/>
-</plate>
-</custom_gcodes_per_layer>"""
-
-_CT_EXTRA = """\
-  <Default Extension="config" ContentType="text/xml"/>
-  <Default Extension="xml" ContentType="text/xml"/>
-"""
-
-def export_3mf(mesh, output_path_3mf, color_changes_z):
-    """
-    Exports a 3MF using trimesh, then injects Bambu Studio specific XMLs 
-    for color changing at specific Z heights.
-    """
-    # 1. Generate base 3MF with trimesh in memory
-    src_buf = io.BytesIO()
-    mesh.export(src_buf, file_type='3mf')
-    src_buf.seek(0)
-
-    # 2. Build custom_gcode_per_layer.xml layer nodes
-    slot_colors = ["#C8C8C8", "#646464", "#000000", "#1a1a1a"]
-    layer_nodes = ""
-    for i, z in enumerate(sorted(color_changes_z)):
-        extruder = i + 2
-        color    = slot_colors[i] if i < len(slot_colors) else "#000000"
-        layer_nodes += (
-            f'<layer top_z="{round(z, 4)}" type="2" extruder="{extruder}" '
-            f'color="{color}" extra="" gcode="tool_change"/>\n'
-        )
-    custom_gcode = _CUSTOM_GCODE_TPL.format(layer_nodes=layer_nodes)
-
-    # 3. Rebuild ZIP: copy Trimesh entries, patch [Content_Types].xml, inject metadata
-    dst_buf = io.BytesIO()
-    with zipfile.ZipFile(src_buf, 'r') as src_zip, \
-         zipfile.ZipFile(dst_buf, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
-
-        for item in src_zip.infolist():
-            data = src_zip.read(item.filename)
-
-            if item.filename == '[Content_Types].xml':
-                ct_text = data.decode('utf-8')
-                if 'Extension="config"' not in ct_text:
-                    ct_text = ct_text.replace('</Types>', _CT_EXTRA + '</Types>')
-                data = ct_text.encode('utf-8')
-
-            dst_zip.writestr(item, data)
-
-        # Inject Bambu metadata
-        dst_zip.writestr('Metadata/custom_gcode_per_layer.xml',
-                         custom_gcode.encode('utf-8'))
-        dst_zip.writestr('Metadata/slice_info.config',
-                         _SLICE_INFO.encode('utf-8'))
-
-    # 4. Write to disk
-    dst_buf.seek(0)
-    with open(output_path_3mf, 'wb') as f:
-        f.write(dst_buf.read())
-
-def suggest_midtones(image):
-    """
-    Uses K-Means clustering (K=4) to find the 4 dominant grayscale values in the image.
-    Sorts them from darkest to lightest. Discards the darkest (Black) and lightest (White/BG).
-    Returns the two intermediate values (L1, L2).
-    """
-    # Downsample image for faster k-means
-    small_img = cv2.resize(image, (256, 256))
-    data = np.float32(small_img.flatten())
-    
-    # Define criteria and apply kmeans
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-    K = 4
-    _, _, centers = cv2.kmeans(data, K, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
-    
-    # Sort centers from darkest to lightest
-    centers = np.sort(centers.flatten())
-    
-    # centers[0] is Black (L3)
-    # centers[1] is Dark Gray (L2)
-    # centers[2] is Light Gray (L1)
-    # centers[3] is White (L0)
-    l2_val = int(centers[1])
-    l1_val = int(centers[2])
-    
-    return l1_val, l2_val
-
-# ---------------------------------------------------------------------------
-# BACKGROUND MESH WORKER
-# ---------------------------------------------------------------------------
 class MeshWorker(QThread):
     progress = pyqtSignal(int, str)
     finished_ok = pyqtSignal(str, str)   # (stl_path, path_3mf)
@@ -393,7 +132,7 @@ class MeshWorker(QThread):
     def _assemble_deckbox_mesh(self, mesh):
         """Scales, rotates and concatenates the art mesh with the deckbox template."""
         import trimesh.transformations as tf
-        template_path = os.path.join("assets", "template_deckbox_open.stl")
+        template_path = resource_path(os.path.join("assets", "template_deckbox_open.stl"))
         if not os.path.exists(template_path):
             print(f"Warning: Deckbox template not found at {template_path}")
             return mesh
@@ -423,14 +162,14 @@ class MeshWorker(QThread):
 
     def _process_lid_logo(self, out_dir, stl_dir):
         """Generates the TCG logo plug and engravings for the deckbox lid."""
-        template_lid = os.path.join("assets", "template_coperchio_bucato.stl")
+        template_lid = resource_path(os.path.join("assets", "template_coperchio_bucato.stl"))
         if not os.path.exists(template_lid):
             print(f"WARNING: Lid template not found at {template_lid}")
             return None
             
         lid_mesh = trimesh.load(template_lid)
         logo_filename = self.TCG_LOGO_MAP.get(self.tcg_name)
-        logo_path = os.path.join("assets", logo_filename) if logo_filename else None
+        logo_path = resource_path(os.path.join("assets", logo_filename)) if logo_filename else None
         
         if logo_path and os.path.exists(logo_path):
             self.progress.emit(97, f"Engraving {self.tcg_name} logo on lid...")
@@ -471,16 +210,12 @@ class MeshWorker(QThread):
         return lid_custom_path
 
     def run(self):
-        import gc
-        import time
-        import os
         try:
             if self.cancel_requested: raise InterruptedError("Process cancelled by user")
             t_start_total = time.time()
             
             if self.is_topo_mode and self.topo_colors:
                 self.progress.emit(10, "🏔 Starting Topographic Color Processing...")
-                import cv2
                 # Ensure we have RGB image for K-Means consistency
                 if isinstance(self.img_filtered, np.ndarray) and len(self.img_filtered.shape) == 2:
                     # If passed grayscale, we convert back to RGB for the color pipeline

@@ -14,7 +14,8 @@ from PyQt6.QtCore import Qt
 
 from utils import resource_path
 from ui_main_window import MainWindowUI
-from core_engine import MeshWorker, suggest_midtones, extract_dominant_colors
+from color_utils import extract_dominant_colors, suggest_midtones
+from worker import MeshWorker
 
 # Abilitiamo i plugin HEIF e AVIF in caso di fallimento OpenCV
 try:
