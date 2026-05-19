@@ -1,7 +1,7 @@
 class DeckboxConfig:
     """Standard dimensions for the deckbox templates."""
-    WALL_WIDTH = 78.14
-    WALL_HEIGHT = 98.0
+    WALL_WIDTH = 70.0
+    WALL_HEIGHT = 92.0
     DEBOSS_DEPTH = 2.0
     BASE_THICKNESS = 4.0
     MIN_SOLID_WALL_THICKNESS = 1.5
