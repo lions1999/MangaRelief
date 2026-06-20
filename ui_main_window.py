@@ -163,7 +163,7 @@ class MainWindowUI(QMainWindow):
         right_layout.addWidget(self.group_topo)
         
         # SWATCH PANEL
-        group_swatch = QGroupBox("Color Picking (Click to calibrate)")
+        self.group_swatch = QGroupBox("Color Picking (Click to calibrate)")
         swatch_layout = QVBoxLayout()
         
         self.chk_auto_midtones = QCheckBox("Auto-Detect Midtones (K-Means)")
@@ -188,8 +188,8 @@ class MainWindowUI(QMainWindow):
             swatch_layout.addWidget(btn)
             self.swatches.append(btn)
             
-        group_swatch.setLayout(swatch_layout)
-        right_layout.addWidget(group_swatch)
+        self.group_swatch.setLayout(swatch_layout)
+        right_layout.addWidget(self.group_swatch)
         
         # PARAMS PANEL
         group_params = QGroupBox("Physical Parameters")
@@ -255,7 +255,7 @@ class MainWindowUI(QMainWindow):
         right_layout.addWidget(group_params)
 
         # HALFTONE Z PANEL
-        group_z = QGroupBox("Halftone Color-Change Z (mm)")
+        self.group_z = QGroupBox("Halftone Color-Change Z (mm)")
         z_layout = QFormLayout()
 
         self.chk_auto_z = QCheckBox("Auto-Calculate Halftone Z")
@@ -264,7 +264,7 @@ class MainWindowUI(QMainWindow):
 
         self.lbl_threshold = QLabel("Halftone Threshold: 10%")
         self.slider_threshold = QSlider(Qt.Orientation.Horizontal)
-        self.slider_threshold.setRange(1, 50)
+        self.slider_threshold.setRange(1, 100)
         self.slider_threshold.setValue(10)
         z_layout.addRow(self.lbl_threshold, self.slider_threshold)
 
@@ -286,8 +286,8 @@ class MainWindowUI(QMainWindow):
         self.lbl_color_mode.setWordWrap(True)
         z_layout.addRow(self.lbl_color_mode)
 
-        group_z.setLayout(z_layout)
-        right_layout.addWidget(group_z)
+        self.group_z.setLayout(z_layout)
+        right_layout.addWidget(self.group_z)
 
         right_layout.addStretch()
 
@@ -330,24 +330,21 @@ class MainWindowUI(QMainWindow):
         
     def _on_mode_changed(self, index):
         """Toggle visibility of specific panels based on the selected mode."""
-        is_topo = (index == 1)
+        is_topo    = (index == 1)
         is_deckbox = (index == 2)
-        
+
         self.group_topo.setVisible(is_topo)
         self.group_deckbox.setVisible(is_deckbox)
-        
-        # Hide standard relief controls if topo is active
-        for child in self.findChildren(QGroupBox):
-            if child.title() in ["Color Picking (Click to calibrate)", "Halftone Color-Change Z (mm)"]:
-                child.setVisible(not is_topo)
+
+        # Hide standard relief controls when topo is active
+        self.group_swatch.setVisible(not is_topo)
+        self.group_z.setVisible(not is_topo)
 
         # Dynamically lock physical parameters for Deckbox mode
         if is_deckbox:
             self.spin_dim.setEnabled(False)
-            
             self.spin_base.setValue(4.0)
             self.spin_base.setEnabled(False)
-            
             self.spin_maxh.setValue(2.0)
             self.spin_maxh.setEnabled(False)
         else:

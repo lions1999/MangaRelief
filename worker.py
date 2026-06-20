@@ -16,9 +16,17 @@ class MeshWorker(QThread):
     finished_ok = pyqtSignal(str, str)   # (stl_path, path_3mf)
     finished_err = pyqtSignal(str)
 
+    # Mapping TCG game names → logo asset filenames (class-level: shared across all instances)
+    TCG_LOGO_MAP = {
+        'Yu-Gi-Oh!': 'yugioh_logo.jpg',
+        'Pokémon':   'pokemon_logo.jpg',
+        'Magic':     'magic_logo.jpg',
+        'One Piece': 'onepiece_logo.jpg',
+    }
+
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,
-                 output_path, output_path_3mf, color_changes_z, layer_height, 
-                 max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15, 
+                 output_path, output_path_3mf, color_changes_z, layer_height,
+                 max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15,
                  color_mode=4, is_deckbox_mode=False, tcg_name='Yu-Gi-Oh!',
                  is_topo_mode=False, topo_colors=None, source_image_name='panel'):
         super().__init__()
@@ -42,14 +50,6 @@ class MeshWorker(QThread):
         self.topo_colors = topo_colors
         self.source_image_name = source_image_name
         self.cancel_requested = False
-        
-        # Mapping TCG names to logo asset files
-        self.TCG_LOGO_MAP = {
-            'Yu-Gi-Oh!': 'yugioh_logo.jpg',
-            'Pokémon': 'pokemon_logo.jpg',
-            'Magic': 'magic_logo.jpg',
-            'One Piece': 'onepiece_logo.jpg',
-        }
 
     def _prepare_image_data(self, img):
         """Optimizes resolution and applies Gaussian blur/Snap filters."""
@@ -161,8 +161,8 @@ class MeshWorker(QThread):
         mesh.apply_translation([tx, ty, tz])
         return trimesh.util.concatenate([box_mesh, mesh])
 
-    def _process_lid_logo(self, out_dir, stl_dir):
-        """Generates the TCG logo plug and engravings for the deckbox lid."""
+    def _process_lid_logo(self):
+        """Generates the TCG logo plug and engravings for the deckbox lid mesh (in memory only)."""
         template_lid = resource_path(os.path.join("assets", "template_coperchio_bucato.stl"))
         if not os.path.exists(template_lid):
             print(f"WARNING: Lid template not found at {template_lid}")
@@ -219,11 +219,7 @@ class MeshWorker(QThread):
             if not lid_mesh.is_watertight:
                 trimesh.repair.fill_holes(lid_mesh)
 
-        lid_custom_path = os.path.join(out_dir, f"deckbox_lid_{self.source_image_name}.3mf")
-        export_3mf(lid_mesh, lid_custom_path, self.color_changes_z)
-        if self.output_path:
-            lid_mesh.export(os.path.join(stl_dir, f"deckbox_lid_{self.source_image_name}.stl"))
-        return lid_custom_path
+        return lid_mesh
 
     def run(self):
         try:
@@ -322,18 +318,38 @@ class MeshWorker(QThread):
                 out_dir = os.path.dirname(self.output_path_3mf or self.output_path)
                 os.makedirs(out_dir, exist_ok=True)
                 stl_dir = os.path.dirname(self.output_path) if self.output_path else out_dir
-                
-                # Export Main Body
-                front_path = os.path.join(out_dir, f"deckbox_front_{self.source_image_name}.3mf")
-                export_3mf(mesh, front_path, self.color_changes_z)
-                if self.output_path:
-                    mesh.export(os.path.join(stl_dir, f"deckbox_front_{self.source_image_name}.stl"))
-                
-                # Export Lid
-                lid_path = self._process_lid_logo(out_dir, stl_dir)
-                
+
+                # Build lid mesh (in memory only)
+                self.progress.emit(97, "Generating Lid...")
+                lid_mesh = self._process_lid_logo()
+
+                # --- Combine front + lid side by side (PLATE_GAP_MM gap) ---
+                self.progress.emit(99, "Assembling full deckbox plate...")
+                GAP_MM = DeckboxConfig.PLATE_GAP_MM
+                full_path_3mf = None
+                full_path_stl = None
+                if lid_mesh is not None:
+                    front_mesh_copy = mesh.copy()
+                    lid_mesh_copy = lid_mesh.copy()
+
+                    front_min_x = front_mesh_copy.bounds[0][0]
+                    front_mesh_copy.apply_translation([-front_min_x, 0, 0])
+
+                    front_max_x = front_mesh_copy.bounds[1][0]
+                    lid_min_x = lid_mesh_copy.bounds[0][0]
+                    lid_mesh_copy.apply_translation([front_max_x + GAP_MM - lid_min_x, 0, 0])
+
+                    full_mesh = trimesh.util.concatenate([front_mesh_copy, lid_mesh_copy])
+
+                    if self.output_path_3mf:
+                        full_path_3mf = os.path.join(out_dir, f"full_deckbox_{self.source_image_name}.3mf")
+                        export_3mf(full_mesh, full_path_3mf, self.color_changes_z)
+                    if self.output_path:
+                        full_path_stl = os.path.join(stl_dir, f"full_deckbox_{self.source_image_name}.stl")
+                        full_mesh.export(full_path_stl)
+
                 self.progress.emit(100, "Export completed!")
-                self.finished_ok.emit(front_path, lid_path or "")
+                self.finished_ok.emit(full_path_3mf or "", full_path_stl or "")
             else:
                 if self.output_path:
                     mesh.export(self.output_path)

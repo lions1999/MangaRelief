@@ -15,6 +15,7 @@ from PyQt6.QtCore import Qt
 from utils import resource_path
 from ui_main_window import MainWindowUI
 from color_utils import extract_dominant_colors, suggest_midtones
+from mesh_utils import compute_topo_z_heights
 from worker import MeshWorker
 
 # Abilitiamo i plugin HEIF e AVIF in caso di fallimento OpenCV
@@ -532,6 +533,45 @@ class Manga3DAppController(MainWindowUI):
     def unlock_ui(self):
         self.toggle_ui_state(disabled=False)
 
+    def _build_color_change_instructions(self) -> str:
+        """
+        Build a human-readable string describing the colour-change Z heights
+        for the export success dialog. Handles Topo, Standard (4/3/2-colour) modes.
+        """
+        is_topo = (self.mode_selector.currentIndex() == 1)
+        if is_topo:
+            base_z   = self.spin_base.value()
+            total_z  = self.spin_maxh.value()
+            layer_h  = self.spin_layer_height.value()
+            n_colors = self.topo_color_list.count()
+            z_heights = compute_topo_z_heights(base_z, total_z, layer_h, n_colors)
+
+            lines = "\U0001f3a8 TOPOGRAPHIC FILAMENT STEPS (Quantized):\n"
+            for i in range(n_colors):
+                rgb = self.topo_color_list.item(i).data(Qt.ItemDataRole.UserRole)
+                if i == 0:
+                    lines += f"  \u2022 Start with: RGB{rgb} (Base up to {z_heights[0]}mm)\n"
+                else:
+                    lines += f"  \u2022 at Z = {z_heights[i]} mm  \u2192  Switch to RGB{rgb}\n"
+            return lines
+
+        mode = getattr(self, 'color_mode_state', 4)
+        z1   = self.spin_z1.value()
+        z2   = self.spin_z2.value()
+        z3   = self.spin_z3.value()
+        if mode == 4:
+            return (
+                f"  \u2022 L1 Light Gray  \u2192  Z = {z1} mm  (Filament 2)\n"
+                f"  \u2022 L2 Dark Gray   \u2192  Z = {z2} mm  (Filament 3)\n"
+                f"  \u2022 L3 Black/Inks  \u2192  Z = {z3} mm  (Filament 4)\n"
+            )
+        if mode == 3:
+            return (
+                f"  \u2022 L2 Dark Gray   \u2192  Z = {z2} mm  (Filament 2)\n"
+                f"  \u2022 L3 Black/Inks  \u2192  Z = {z3} mm  (Filament 3)\n"
+            )
+        return f"  \u2022 L3 Black/Inks  \u2192  Z = {z3} mm  (Filament 2)\n"
+
     def on_generate_done(self, stl_path, path_3mf):
         self.unlock_ui()
         self.progress_bar.setValue(100)
@@ -540,77 +580,23 @@ class Manga3DAppController(MainWindowUI):
         mins, secs = divmod(int(elapsed), 60)
         time_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
         
-        self.lbl_status.setText(f"🏁 STL + 3MF Export Completed in {time_str}!")
+        self.lbl_status.setText(f"\U0001f3c1 STL + 3MF Export Completed in {time_str}!")
 
-        # Retrieve the Z values that were actually used
-        z1 = self.spin_z1.value()
-        z2 = self.spin_z2.value()
-        z3 = self.spin_z3.value()
-
-        # Build color-change instructions based on detected mode
-        is_topo = (self.mode_selector.currentIndex() == 1)
-        
-        if is_topo:
-            # --- TOPOGRAPHIC MODE INSTRUCTIONS (Quantized) ---
-            base_z = self.spin_base.value()
-            total_z = self.spin_maxh.value()
-            layer_h = self.spin_layer_height.value()
-            n_colors = self.topo_color_list.count()
-            
-            base_layers = int(round(base_z / layer_h))
-            total_layers = int(round(total_z / layer_h))
-            remaining_layers = total_layers - base_layers
-            
-            exact_z_heights = [round(base_layers * layer_h, 3)]
-            if n_colors > 1 and remaining_layers > 0:
-                base_dist = remaining_layers // (n_colors - 1)
-                remainder = remaining_layers % (n_colors - 1)
-                layers_per_color = [base_dist] * (n_colors - 1)
-                for j in range(remainder):
-                    layers_per_color[j] += 1
-                
-                curr_l = base_layers
-                for layers in layers_per_color:
-                    curr_l += layers
-                    exact_z_heights.append(round(curr_l * layer_h, 3))
-            else:
-                exact_z_heights = [round(base_z, 3)] * n_colors
-            
-            color_lines = "🎨 TOPOGRAPHIC FILAMENT STEPS (Quantized):\n"
-            for i in range(n_colors):
-                rgb = self.topo_color_list.item(i).data(Qt.ItemDataRole.UserRole)
-                if i == 0:
-                    color_lines += f"  • Start with: RGB{rgb} (Base up to {exact_z_heights[0]}mm)\n"
-                else:
-                    color_lines += f"  • at Z = {exact_z_heights[i]} mm  →  Switch to RGB{rgb}\n"
-        else:
-            # --- STANDARD RELIEF INSTRUCTIONS ---
-            mode = getattr(self, 'color_mode_state', 4)
-            z1 = self.spin_z1.value()
-            z2 = self.spin_z2.value()
-            z3 = self.spin_z3.value()
-            
-            if mode == 4:
-                color_lines = (
-                    f"  • L1 Light Gray  →  Z = {z1} mm  (Filament 2)\n"
-                    f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 3)\n"
-                    f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 4)\n"
-                )
-            elif mode == 3:
-                color_lines = (
-                    f"  • L2 Dark Gray   →  Z = {z2} mm  (Filament 2)\n"
-                    f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 3)\n"
-                )
-            else: # mode == 2
-                color_lines = (
-                    f"  • L3 Black/Inks  →  Z = {z3} mm  (Filament 2)\n"
-                )
+        color_lines = self._build_color_change_instructions()
+        is_deckbox = (self.mode_selector.currentIndex() == 2)
 
         msg = "Files saved:\n"
-        if stl_path:
-            msg += f"📄 STL → {stl_path}\n"
-        if path_3mf:
-            msg += f"🎨 3MF → {path_3mf}\n"
+        if is_deckbox:
+            # In deckbox mode the worker emits (full_3mf, full_stl) for the combined plate
+            if stl_path:
+                msg += f"🎨 3MF (Full Plate) → {stl_path}\n"
+            if path_3mf:
+                msg += f"📄 STL (Full Plate) → {path_3mf}\n"
+        else:
+            if stl_path:
+                msg += f"📄 STL → {stl_path}\n"
+            if path_3mf:
+                msg += f"🎨 3MF → {path_3mf}\n"
             
         msg += f"\n⏱️ Time elapsed: {time_str}\n\n"
         

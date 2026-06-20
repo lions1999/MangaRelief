@@ -7,6 +7,8 @@ from PIL import Image
 from scipy.spatial import cKDTree
 from scipy.ndimage import median_filter
 
+from config import SLOT_COLORS_3MF
+
 def create_solid_mesh(X, Y, Z, bottom_z=0.0):
     """
     Generates a solid watertight mesh from X, Y, Z meshgrids.
@@ -55,6 +57,32 @@ def create_solid_mesh(X, Y, Z, bottom_z=0.0):
     return trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
 
 
+def compute_topo_z_heights(base_z: float, total_z: float, layer_height: float, n_colors: int) -> list:
+    """
+    Compute discrete, layer-snapped Z heights for each colour in Topographic mode.
+    The first height corresponds to the base layer; subsequent heights are evenly
+    distributed across the remaining print height.
+    """
+    base_layers  = int(round(base_z    / layer_height))
+    total_layers = int(round(total_z   / layer_height))
+    remaining    = total_layers - base_layers
+
+    z_heights = [round(base_layers * layer_height, 3)]
+    if n_colors > 1 and remaining > 0:
+        base_dist          = remaining // (n_colors - 1)
+        extra              = remaining  % (n_colors - 1)
+        layers_per_color   = [base_dist] * (n_colors - 1)
+        for i in range(extra):
+            layers_per_color[i] += 1
+        current_l = base_layers
+        for lc in layers_per_color:
+            current_l += lc
+            z_heights.append(round(current_l * layer_height, 3))
+    else:
+        z_heights = [round(base_z, 3)] * n_colors
+    return z_heights
+
+
 def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list, 
                       base_z: float = 1.0, total_z: float = 2.4, 
                       max_dim: float = 100.0, layer_height: float = 0.2):
@@ -70,29 +98,9 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
         h, w = image_rgb.shape[:2]
 
     n_colors = len(sorted_colors_rgb)
-    
-    # --- LOGICA DI QUANTIZZAZIONE LAYER ---
-    base_layers = int(round(base_z / layer_height))
-    total_layers = int(round(total_z / layer_height))
-    remaining_layers = total_layers - base_layers
 
-    # Distribuisci i layer rimanenti tra i colori (escluso il colore di base)
-    exact_z_heights = [round(base_layers * layer_height, 3)]
-    if n_colors > 1 and remaining_layers > 0:
-        base_dist = remaining_layers // (n_colors - 1)
-        remainder = remaining_layers % (n_colors - 1)
-        layers_per_color = [base_dist] * (n_colors - 1)
-        # Distribuisce i layer extra ai primi colori (quelli più bassi/scuri)
-        for i in range(remainder):
-            layers_per_color[i] += 1
-            
-        current_l = base_layers
-        for layers in layers_per_color:
-            current_l += layers
-            exact_z_heights.append(round(current_l * layer_height, 3))
-    else:
-        # Fallback se c'è un solo colore o non c'è spazio per layer extra
-        exact_z_heights = [round(base_z, 3)] * n_colors
+    # --- LAYER QUANTISATION ---
+    exact_z_heights = compute_topo_z_heights(base_z, total_z, layer_height, n_colors)
 
     # Mappa pixel ai colori tramite cKDTree (velocissimo)
     tree = cKDTree(sorted_colors_rgb)
@@ -164,7 +172,7 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
     src_buf.seek(0)
 
     # 2. Build custom_gcode_per_layer.xml layer nodes
-    slot_colors = ["#C8C8C8", "#646464", "#000000", "#1a1a1a"]
+    slot_colors = SLOT_COLORS_3MF
     layer_nodes = ""
     for i, z in enumerate(sorted(color_changes_z)):
         extruder = i + 2
