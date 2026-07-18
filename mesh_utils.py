@@ -215,10 +215,12 @@ _CT_EXTRA = """\
   <Default Extension="xml" ContentType="text/xml"/>
 """
 
-def export_3mf(mesh, output_path_3mf, color_changes_z):
+def export_3mf(mesh, output_path_3mf, color_changes_z, slot_colors=None):
     """
-    Exports a 3MF using trimesh, then injects Bambu Studio specific XMLs 
+    Exports a 3MF using trimesh, then injects Bambu Studio specific XMLs
     for color changing at specific Z heights.
+    slot_colors: lista opzionale di hex (dal 2° filamento in poi) per
+    sovrascrivere i grigi di default, es. i colori reali della palette Spot.
     """
     # 1. Generate base 3MF with trimesh in memory
     src_buf = io.BytesIO()
@@ -228,7 +230,7 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
     # 2. Build custom_gcode_per_layer.xml layer nodes
     # Scarta i livelli non usati (z=0 nelle modalità 2/3 colori) e i duplicati,
     # altrimenti Bambu Studio riceve cambi colore fantasma al layer 0
-    slot_colors = SLOT_COLORS_3MF
+    slot_colors = slot_colors or SLOT_COLORS_3MF
     layer_nodes = ""
     valid_z = sorted({round(z, 4) for z in color_changes_z if z > 0})
     for i, z in enumerate(valid_z):

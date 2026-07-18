@@ -16,7 +16,7 @@ from utils import resource_path
 from ui_main_window import MainWindowUI
 from color_utils import (extract_dominant_colors, suggest_midtones,
                          suggest_spot_accents, classify_spot_pixels,
-                         downsample_for_analysis)
+                         downsample_for_analysis, build_spot_palette)
 from mesh_utils import compute_topo_z_heights, compute_topo_switch_z
 from worker import MeshWorker
 
@@ -574,9 +574,10 @@ class Manga3DAppController(MainWindowUI):
 
         self.generation_start_time = time.time()
         
-        # In Topo mode, pass the RGB image instead of the filtered grayscale one
-        input_img = self.img_rgb_original if is_topo else self.img_filtered_array
-        
+        # In Topo/Spot mode, pass the RGB image instead of the filtered grayscale one
+        is_spot = (self.mode_selector.currentIndex() == 3)
+        input_img = self.img_rgb_original if (is_topo or is_spot) else self.img_filtered_array
+
         self.worker = MeshWorker(
             img_filtered=input_img,
             sampled_values=self.sampled_colors,
@@ -596,7 +597,10 @@ class Manga3DAppController(MainWindowUI):
             tcg_name=self.combo_tcg_select.currentText(),
             is_topo_mode=is_topo,
             topo_colors=topo_colors,
-            source_image_name=base_name
+            source_image_name=base_name,
+            is_spot_mode=is_spot,
+            spot_accents=self._get_spot_accents(),
+            spot_coverage=self.slider_spot_coverage.value()
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
@@ -664,6 +668,22 @@ class Manga3DAppController(MainWindowUI):
         Build a human-readable string describing the colour-change Z heights
         for the export success dialog. Handles Topo, Standard (4/3/2-colour) modes.
         """
+        if self.mode_selector.currentIndex() == 3:  # Spot Color
+            palette  = build_spot_palette(self._get_spot_accents())
+            layer_h  = self.spin_layer_height.value()
+            z_heights = compute_topo_z_heights(self.spin_base.value(),
+                                               self.spin_maxh.value(),
+                                               layer_h, len(palette))
+            switch_z = compute_topo_switch_z(z_heights, layer_h)
+
+            lines = "🎯 SPOT COLOR FILAMENT STEPS (Quantized):\n"
+            for i, rgb in enumerate(palette):
+                if i == 0:
+                    lines += f"  • Start with: RGB{rgb} (Base up to {z_heights[0]}mm)\n"
+                else:
+                    lines += f"  • at Z = {switch_z[i-1]} mm  →  Switch to RGB{rgb}\n"
+            return lines
+
         is_topo = (self.mode_selector.currentIndex() == 1)
         if is_topo:
             base_z   = self.spin_base.value()

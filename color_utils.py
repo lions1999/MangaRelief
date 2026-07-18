@@ -166,6 +166,14 @@ def suggest_spot_accents(image_rgb: np.ndarray, n_accents: int = 2) -> list:
 SPOT_HUE_TOL = 18
 SPOT_V_MIN = 60
 
+def build_spot_palette(accents_rgb: list) -> list:
+    """Palette Spot Color ordinata per la stampa:
+    [base bianca, accenti dal più chiaro al più scuro, nero top]."""
+    accents = sorted((tuple(int(v) for v in a) for a in accents_rgb),
+                     key=lambda c: 0.299*c[0] + 0.587*c[1] + 0.114*c[2],
+                     reverse=True)
+    return [SPOT_BASE_RGB] + accents + [SPOT_TOP_RGB]
+
 def classify_spot_pixels(image_rgb: np.ndarray, accents_rgb: list,
                          coverage: int = 40):
     """Classifica ogni pixel sulla palette Spot Color:
@@ -175,10 +183,8 @@ def classify_spot_pixels(image_rgb: np.ndarray, accents_rgb: list,
     e la sua tinta è entro ±36° da quella dell'accento; tutto il resto viene
     binarizzato bianco/nero sulla luminosità.
     Ritorna (palette_rgb, indices HxW di indici nella palette)."""
-    accents = sorted((tuple(int(v) for v in a) for a in accents_rgb),
-                     key=lambda c: 0.299*c[0] + 0.587*c[1] + 0.114*c[2],
-                     reverse=True)
-    palette = [SPOT_BASE_RGB] + accents + [SPOT_TOP_RGB]
+    palette = build_spot_palette(accents_rgb)
+    accents = palette[1:-1]
     n = len(palette)
     h, w = image_rgb.shape[:2]
 

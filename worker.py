@@ -10,6 +10,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from config import DeckboxConfig
 from mesh_utils import (create_solid_mesh, process_mesh_topo, export_3mf,
                         compute_topo_z_heights, compute_topo_switch_z)
+from color_utils import classify_spot_pixels, downsample_for_analysis
 from utils import resource_path
 
 class MeshWorker(QThread):
@@ -30,7 +31,8 @@ class MeshWorker(QThread):
                  output_path, output_path_3mf, color_changes_z, layer_height,
                  max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15,
                  color_mode=4, is_deckbox_mode=False, tcg_name='Yu-Gi-Oh!',
-                 is_topo_mode=False, topo_colors=None, source_image_name='panel'):
+                 is_topo_mode=False, topo_colors=None, source_image_name='panel',
+                 is_spot_mode=False, spot_accents=None, spot_coverage=40):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -51,6 +53,9 @@ class MeshWorker(QThread):
         self.is_topo_mode = is_topo_mode
         self.topo_colors = topo_colors
         self.source_image_name = source_image_name
+        self.is_spot_mode = is_spot_mode
+        self.spot_accents = spot_accents or []
+        self.spot_coverage = spot_coverage
         self.cancel_requested = False
 
     def _check_cancel(self):
@@ -240,6 +245,24 @@ class MeshWorker(QThread):
             # Quote dei cambi colore da iniettare nel 3MF: in topo vengono
             # ricalcolate sulle terrazze, altrimenti valgono quelle Standard
             export_changes_z = self.color_changes_z
+            export_slot_colors = None
+
+            if self.is_spot_mode:
+                self.progress.emit(8, "🎯 Spot Color classification...")
+                if isinstance(self.img_filtered, np.ndarray) and len(self.img_filtered.shape) == 2:
+                    img_rgb_src = cv2.cvtColor(self.img_filtered, cv2.COLOR_GRAY2RGB)
+                else:
+                    img_rgb_src = self.img_filtered
+                small = downsample_for_analysis(img_rgb_src, self.max_res_cap)
+                palette, idx_map = classify_spot_pixels(small, self.spot_accents,
+                                                        coverage=self.spot_coverage)
+                self.img_filtered = np.array(palette, dtype=np.uint8)[idx_map]
+                # Nei metadata 3MF finiscono i colori reali della palette (non i grigi)
+                export_slot_colors = ['#%02x%02x%02x' % tuple(c) for c in palette[1:]]
+                # Da qui in poi la pipeline coincide con la Topographic:
+                # terrazze della palette, snap post-decimazione, cambi filamento
+                self.is_topo_mode = True
+                self.topo_colors = palette
 
             if self.is_topo_mode and self.topo_colors:
                 self.progress.emit(10, "🏔 Starting Topographic Color Processing...")
@@ -387,7 +410,8 @@ class MeshWorker(QThread):
                 if self.output_path:
                     mesh.export(self.output_path)
                 if self.output_path_3mf:
-                    export_3mf(mesh, self.output_path_3mf, export_changes_z)
+                    export_3mf(mesh, self.output_path_3mf, export_changes_z,
+                               slot_colors=export_slot_colors)
                 
                 self.progress.emit(100, "Export completed!")
                 self.finished_ok.emit(self.output_path or "", self.output_path_3mf or "")
