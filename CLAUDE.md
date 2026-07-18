@@ -9,7 +9,7 @@ MangaRelief Pro is a Windows-targeted PyQt6 desktop app that converts 2D manga p
 ## Commands
 
 ```bash
-pip install -r requirements.txt   # note: fast_simplification, scipy, and scikit-learn are also imported but missing from requirements.txt
+pip install -r requirements.txt
 python manga_to_3d.py             # run the app (GUI — needs a display)
 python test_topo_colors.py <image>  # manual smoke test of the topographic pipeline (K-Means posterize + STL export, no GUI)
 build_exe.bat                     # Windows PyInstaller build (uses --add-data for style.qss, icon.ico, assets/)
