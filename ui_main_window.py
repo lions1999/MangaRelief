@@ -130,7 +130,7 @@ class MainWindowUI(QMainWindow):
         
         self.mode_selector = QComboBox()
         self.mode_selector.setObjectName("mode_selector")
-        self.mode_selector.addItems(["Standard Manga Relief", "Topographic Color (Single Extruder)", "Deckbox Engraving"])
+        self.mode_selector.addItems(["Standard Manga Relief", "Topographic Color (Single Extruder)", "Deckbox Engraving", "Spot Color (Silkscreen)"])
         right_layout.addWidget(self.mode_selector)
         
         self.group_deckbox = QGroupBox("Deckbox Settings")
@@ -162,6 +162,50 @@ class MainWindowUI(QMainWindow):
         self.group_topo.setVisible(False)
         right_layout.addWidget(self.group_topo)
         
+        # SPOT COLOR PANEL (Hidden by default)
+        self.group_spot = QGroupBox("Spot Color Settings")
+        spot_layout = QVBoxLayout()
+
+        self.combo_spot_naccents = QComboBox()
+        self.combo_spot_naccents.addItems(["1 Accent Color", "2 Accent Colors"])
+        spot_layout.addWidget(self.combo_spot_naccents)
+
+        self.btn_spot_auto = QPushButton("🤖 Auto-Detect Accents")
+        spot_layout.addWidget(self.btn_spot_auto)
+
+        self.lbl_spot_info = QLabel("Click an accent below, then click on the image to sample its color.")
+        self.lbl_spot_info.setWordWrap(True)
+        spot_layout.addWidget(self.lbl_spot_info)
+
+        self.spot_swatches = []
+        for i in range(2):
+            btn = QPushButton(f"Accent {i+1}: [ -- ]")
+            btn.setProperty("class", "swatch")
+            spot_layout.addWidget(btn)
+            self.spot_swatches.append(btn)
+
+        self.lbl_spot_coverage = QLabel("Accent Coverage: 40%")
+        self.slider_spot_coverage = QSlider(Qt.Orientation.Horizontal)
+        self.slider_spot_coverage.setRange(0, 100)
+        self.slider_spot_coverage.setValue(40)
+        self.slider_spot_coverage.setToolTip("Low = only vivid pixels become accent. High = muted shades too.")
+        spot_layout.addWidget(self.lbl_spot_coverage)
+        spot_layout.addWidget(self.slider_spot_coverage)
+
+        self.btn_spot_mockup = QPushButton("👁 Mockup Preview")
+        self.btn_spot_mockup.setCheckable(True)
+        self.btn_spot_mockup.setEnabled(False)
+        spot_layout.addWidget(self.btn_spot_mockup)
+
+        self.group_spot.setLayout(spot_layout)
+        self.group_spot.setVisible(False)
+        right_layout.addWidget(self.group_spot)
+
+        # Il secondo swatch accento compare solo scegliendo "2 Accent Colors"
+        self.spot_swatches[1].setVisible(False)
+        self.combo_spot_naccents.currentIndexChanged.connect(
+            lambda i: self.spot_swatches[1].setVisible(i == 1))
+
         # SWATCH PANEL
         self.group_swatch = QGroupBox("Color Picking (Click to calibrate)")
         swatch_layout = QVBoxLayout()
@@ -320,6 +364,22 @@ class MainWindowUI(QMainWindow):
         
         # Connect mode selector to visibility toggle
         self.mode_selector.currentIndexChanged.connect(self._on_mode_changed)
+
+        # Registro dei widget da bloccare durante la generazione: ogni nuovo
+        # controllo va aggiunto QUI, non dentro toggle_ui_state
+        self.lockable_widgets = [
+            self.btn_load, self.mode_selector, self.combo_tcg_select,
+            self.btn_extract_topo, self.topo_color_list,
+            self.combo_spot_naccents, self.btn_spot_auto, *self.spot_swatches,
+            self.slider_spot_coverage, self.btn_spot_mockup,
+            self.chk_auto_midtones, *self.swatches,
+            self.spin_dim, self.spin_base, self.spin_maxh, self.spin_layer_height,
+            self.cmb_quality, self.chk_smart_decimate,
+            self.spin_white_clip, self.btn_auto_white, self.spin_black_clip,
+            self.chk_auto_z, self.slider_threshold,
+            self.spin_z1, self.spin_z2, self.spin_z3,
+            self.chk_export_3mf, self.chk_export_stl,
+        ]
         
         splitter.addWidget(self.scroll_area)
         splitter.setSizes([800, 420])
@@ -332,13 +392,15 @@ class MainWindowUI(QMainWindow):
         """Toggle visibility of specific panels based on the selected mode."""
         is_topo    = (index == 1)
         is_deckbox = (index == 2)
+        is_spot    = (index == 3)
 
         self.group_topo.setVisible(is_topo)
         self.group_deckbox.setVisible(is_deckbox)
+        self.group_spot.setVisible(is_spot)
 
-        # Hide standard relief controls when topo is active
-        self.group_swatch.setVisible(not is_topo)
-        self.group_z.setVisible(not is_topo)
+        # Hide standard relief controls when topo/spot are active
+        self.group_swatch.setVisible(not (is_topo or is_spot))
+        self.group_z.setVisible(not (is_topo or is_spot))
 
         # Dynamically lock physical parameters for Deckbox mode
         if is_deckbox:

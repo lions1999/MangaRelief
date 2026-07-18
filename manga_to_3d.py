@@ -486,29 +486,20 @@ class Manga3DAppController(MainWindowUI):
         self.lbl_status.setText(msg)
 
     def toggle_ui_state(self, disabled=True):
-        self.btn_load.setEnabled(not disabled)
-        for btn in self.swatches:
-            btn.setEnabled(not disabled)
-        self.slider_threshold.setEnabled(not disabled)
-        self.chk_auto_z.setEnabled(not disabled)
-        self.spin_base.setEnabled(not disabled)
-        self.spin_maxh.setEnabled(not disabled)
-        self.spin_dim.setEnabled(not disabled)
-        self.spin_layer_height.setEnabled(not disabled)
-        self.cmb_quality.setEnabled(not disabled)
-        self.chk_smart_decimate.setEnabled(not disabled)
-        self.spin_white_clip.setEnabled(not disabled)
-        self.btn_auto_white.setEnabled(not disabled)
-        self.spin_black_clip.setEnabled(not disabled)
-        self.chk_export_3mf.setEnabled(not disabled)
-        self.chk_export_stl.setEnabled(not disabled)
-        self.mode_selector.setEnabled(not disabled)
-        self.combo_tcg_select.setEnabled(not disabled)
-        
-        if not self.chk_auto_z.isChecked():
-            self.spin_z1.setEnabled(not disabled)
-            self.spin_z2.setEnabled(not disabled)
-            self.spin_z3.setEnabled(not disabled)
+        for wdg in self.lockable_widgets:
+            wdg.setEnabled(not disabled)
+
+        if not disabled:
+            # Ripristina gli stati condizionali sovrascritti dal lock generale
+            auto_z = self.chk_auto_z.isChecked()
+            for sp in (self.spin_z1, self.spin_z2, self.spin_z3):
+                sp.setEnabled(not auto_z)
+                sp.setReadOnly(auto_z)
+            for btn in self.swatches:
+                btn.setEnabled(not self.chk_auto_midtones.isChecked())
+            self.btn_spot_mockup.setEnabled(self.img_filtered_array is not None)
+            # In Deckbox i parametri fisici restano bloccati anche dopo l'unlock
+            self._on_mode_changed(self.mode_selector.currentIndex())
 
         if disabled:
             self.btn_generate.setText("🛑 Cancel")
