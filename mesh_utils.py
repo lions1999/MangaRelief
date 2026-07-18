@@ -96,12 +96,13 @@ def compute_topo_switch_z(z_heights: list, layer_height: float) -> list:
 
 
 def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
-                      base_z: float = 1.0, total_z: float = 2.4, 
-                      max_dim: float = 100.0, layer_height: float = 0.2):
+                      base_z: float = 1.0, total_z: float = 2.4,
+                      max_dim: float = 100.0, layer_height: float = 0.2,
+                      max_res_cap: int = 800):
     """Genera una mesh a terrazze basata sui colori forniti, quantizzata sui layer di stampa."""
-    # Pre-scaling a 800px per performance e pulizia stampa
+    # Pre-scaling al cap del selettore Mesh Quality (Draft 800 / Standard 1200 / Ultra 1600)
     h, w = image_rgb.shape[:2]
-    max_size = 800
+    max_size = int(max_res_cap)
     if max(h, w) > max_size:
         scale = max_size / max(h, w)
         new_w, new_h = int(w * scale), int(h * scale)
@@ -123,8 +124,10 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
     _, indices = tree.query(pixels_flat)
     indices = indices.reshape(h, w)
 
-    # Applica un filtro mediana per "compattare" le zone di colore e rimuovere il rumore (pixel isolati)
-    indices = median_filter(indices, size=5)
+    # Applica un filtro mediana per "compattare" le zone di colore e rimuovere il rumore
+    # (pixel isolati). Alle risoluzioni alte il kernel scende a 3 per non mangiare
+    # le linee fini (a 800px un kernel 5 cancella dettagli sotto ~1.5mm di stampa)
+    indices = median_filter(indices, size=5 if max(h, w) <= 800 else 3)
 
     # Costruisci heightmap discreta usando le altezze quantizzate
     Z = np.zeros((h, w), dtype=np.float32)

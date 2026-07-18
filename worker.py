@@ -254,12 +254,13 @@ class MeshWorker(QThread):
                     img_rgb = self.img_filtered
 
                 mesh = process_mesh_topo(
-                    img_rgb, 
-                    self.topo_colors, 
-                    base_z=self.base_h, 
+                    img_rgb,
+                    self.topo_colors,
+                    base_z=self.base_h,
                     total_z=self.max_h,
                     max_dim=self.max_dim,
-                    layer_height=self.layer_height
+                    layer_height=self.layer_height,
+                    max_res_cap=self.max_res_cap
                 )
                 self._check_cancel()
                 self.progress.emit(80, "Optimizing Topo Mesh...")
