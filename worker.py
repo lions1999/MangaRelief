@@ -8,7 +8,8 @@ import fast_simplification
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from config import DeckboxConfig
-from mesh_utils import create_solid_mesh, process_mesh_topo, export_3mf
+from mesh_utils import (create_solid_mesh, process_mesh_topo, export_3mf,
+                        compute_topo_z_heights, compute_topo_switch_z)
 from utils import resource_path
 
 class MeshWorker(QThread):
@@ -236,8 +237,15 @@ class MeshWorker(QThread):
             self._check_cancel()
             t_start_total = time.time()
             
+            # Quote dei cambi colore da iniettare nel 3MF: in topo vengono
+            # ricalcolate sulle terrazze, altrimenti valgono quelle Standard
+            export_changes_z = self.color_changes_z
+
             if self.is_topo_mode and self.topo_colors:
                 self.progress.emit(10, "🏔 Starting Topographic Color Processing...")
+                topo_z_heights = compute_topo_z_heights(
+                    self.base_h, self.max_h, self.layer_height, len(self.topo_colors))
+                export_changes_z = compute_topo_switch_z(topo_z_heights, self.layer_height)
                 # Ensure we have RGB image for K-Means consistency
                 if isinstance(self.img_filtered, np.ndarray) and len(self.img_filtered.shape) == 2:
                     # If passed grayscale, we convert back to RGB for the color pipeline
@@ -316,6 +324,15 @@ class MeshWorker(QThread):
                     target_count=target, agg=6.0
                 )
                 mesh = trimesh.Trimesh(vertices=v_out, faces=f_out, process=False)
+
+                if self.is_topo_mode and self.topo_colors:
+                    # Ri-snap delle quote alle terrazze: la decimazione inclina le
+                    # pareti verticali e lo slicer mostrerebbe anelli di colori
+                    # intermedi attorno ad ogni bordo (es. frangia rossa sul nero)
+                    allowed_z = np.array([0.0] + topo_z_heights)
+                    nearest = np.abs(mesh.vertices[:, [2]] - allowed_z[None, :]).argmin(axis=1)
+                    mesh.vertices[:, 2] = allowed_z[nearest]
+
                 trimesh.repair.fix_normals(mesh)
                 if not mesh.is_watertight:
                     trimesh.repair.fill_holes(mesh)
@@ -369,7 +386,7 @@ class MeshWorker(QThread):
                 if self.output_path:
                     mesh.export(self.output_path)
                 if self.output_path_3mf:
-                    export_3mf(mesh, self.output_path_3mf, self.color_changes_z)
+                    export_3mf(mesh, self.output_path_3mf, export_changes_z)
                 
                 self.progress.emit(100, "Export completed!")
                 self.finished_ok.emit(self.output_path or "", self.output_path_3mf or "")

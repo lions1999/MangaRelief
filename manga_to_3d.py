@@ -15,7 +15,7 @@ from PyQt6.QtCore import Qt
 from utils import resource_path
 from ui_main_window import MainWindowUI
 from color_utils import extract_dominant_colors, suggest_midtones
-from mesh_utils import compute_topo_z_heights
+from mesh_utils import compute_topo_z_heights, compute_topo_switch_z
 from worker import MeshWorker
 
 # Abilitiamo i plugin HEIF e AVIF in caso di fallimento OpenCV
@@ -558,6 +558,9 @@ class Manga3DAppController(MainWindowUI):
             layer_h  = self.spin_layer_height.value()
             n_colors = self.topo_color_list.count()
             z_heights = compute_topo_z_heights(base_z, total_z, layer_h, n_colors)
+            # Il cambio va al primo layer sopra la terrazza del colore precedente,
+            # non al top della terrazza del colore stesso (off-by-one di banda)
+            switch_z = compute_topo_switch_z(z_heights, layer_h)
 
             lines = "\U0001f3a8 TOPOGRAPHIC FILAMENT STEPS (Quantized):\n"
             for i in range(n_colors):
@@ -565,7 +568,7 @@ class Manga3DAppController(MainWindowUI):
                 if i == 0:
                     lines += f"  \u2022 Start with: RGB{rgb} (Base up to {z_heights[0]}mm)\n"
                 else:
-                    lines += f"  \u2022 at Z = {z_heights[i]} mm  \u2192  Switch to RGB{rgb}\n"
+                    lines += f"  \u2022 at Z = {switch_z[i-1]} mm  \u2192  Switch to RGB{rgb}\n"
             return lines
 
         mode = getattr(self, 'color_mode_state', 4)

@@ -84,7 +84,18 @@ def compute_topo_z_heights(base_z: float, total_z: float, layer_height: float, n
     return z_heights
 
 
-def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list, 
+def compute_topo_switch_z(z_heights: list, layer_height: float) -> list:
+    """
+    Quote dei cambi filamento per la modalità Topographic.
+    Il cambio verso il colore i va inserito al primo layer SOPRA la terrazza
+    del colore precedente (z_heights[i-1] + layer_height), NON al top della
+    terrazza del colore stesso: altrimenti ogni colore riceve un solo layer
+    utile e i layer sbagliati restano nascosti sotto le superfici.
+    """
+    return [round(z_heights[i - 1] + layer_height, 3) for i in range(1, len(z_heights))]
+
+
+def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
                       base_z: float = 1.0, total_z: float = 2.4, 
                       max_dim: float = 100.0, layer_height: float = 0.2):
     """Genera una mesh a terrazze basata sui colori forniti, quantizzata sui layer di stampa."""
