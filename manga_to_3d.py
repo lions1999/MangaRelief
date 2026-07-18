@@ -14,7 +14,9 @@ from PyQt6.QtCore import Qt
 
 from utils import resource_path
 from ui_main_window import MainWindowUI
-from color_utils import extract_dominant_colors, suggest_midtones
+from color_utils import (extract_dominant_colors, suggest_midtones,
+                         suggest_spot_accents, classify_spot_pixels,
+                         downsample_for_analysis)
 from mesh_utils import compute_topo_z_heights, compute_topo_switch_z
 from worker import MeshWorker
 
@@ -47,6 +49,10 @@ class Manga3DAppController(MainWindowUI):
         self.color_mode_state = 4
         self.last_midtone_pct = 100.0
 
+        # Spot Color state
+        self.spot_accents = [None, None]
+        self.active_spot_swatch = None
+
         self.setup_connections()
         self.update_swatch_colors()
         self._refresh_auto_z_display()
@@ -71,15 +77,114 @@ class Manga3DAppController(MainWindowUI):
         self.spin_maxh.valueChanged.connect(self._on_physical_param_changed)
         self.spin_layer_height.valueChanged.connect(self._on_physical_param_changed)
 
+        # Spot Color
+        self.btn_spot_auto.clicked.connect(self._apply_spot_auto)
+        for i, btn in enumerate(self.spot_swatches):
+            btn.clicked.connect(lambda checked, idx=i: self.set_active_spot_swatch(idx))
+        self.slider_spot_coverage.valueChanged.connect(self._on_spot_coverage_changed)
+        self.combo_spot_naccents.currentIndexChanged.connect(lambda _: self._refresh_spot_mockup())
+        self.btn_spot_mockup.toggled.connect(self._on_spot_mockup_toggled)
+
     def _update_viewport_mode(self, index):
         """Switch viewport display between Color and Grayscale based on selected mode."""
+        # Cambiando modalità il mockup Spot si spegne sempre
+        if self.btn_spot_mockup.isChecked():
+            self.btn_spot_mockup.setChecked(False)
+            return  # il toggle handler richiama questo metodo col viewport giusto
+
         if getattr(self, 'img_filtered_array', None) is None:
             return
-            
-        if index == 1: # Topographic Mode
+
+        if index == 1:   # Topographic Mode
             self.viewer.setImage(self._get_rgb_filtered())
-        else: # Standard Mode
+        elif index == 3: # Spot Color Mode: serve l'originale a colori per il picking
+            self.viewer.setImage(self.img_rgb_original)
+        else:            # Standard / Deckbox
             self.viewer.setImage(self.img_filtered_array)
+
+    # ------------------------------------------------------------------
+    # SPOT COLOR — picking, auto-detect, mockup
+    # ------------------------------------------------------------------
+
+    def _get_spot_accents(self):
+        """Accenti attivi (1 o 2 in base al selettore), senza i None."""
+        n = self.combo_spot_naccents.currentIndex() + 1
+        return [a for a in self.spot_accents[:n] if a is not None]
+
+    def set_active_spot_swatch(self, idx):
+        if getattr(self, 'img_rgb_original', None) is None:
+            QMessageBox.information(self, "Warning", "Please load an image before sampling accents.")
+            return
+        self.active_spot_swatch = idx
+        self.lbl_status.setText("🎯 Left Click on the image to sample the accent color...")
+
+    def _sample_accent_at(self, x, y):
+        """Mediana 5x5 attorno al click: robusta contro il rumore JPEG."""
+        h, w = self.img_rgb_original.shape[:2]
+        x0, x1 = max(0, x - 2), min(w, x + 3)
+        y0, y1 = max(0, y - 2), min(h, y + 3)
+        patch = self.img_rgb_original[y0:y1, x0:x1].reshape(-1, 3)
+        return tuple(int(v) for v in np.median(patch, axis=0))
+
+    def _apply_spot_auto(self):
+        if getattr(self, 'img_rgb_original', None) is None:
+            QMessageBox.warning(self, "Warning", "Please load an image first.")
+            return
+        n = self.combo_spot_naccents.currentIndex() + 1
+        self.lbl_status.setText("🤖 Detecting accent colors...")
+        QApplication.processEvents()
+        found = suggest_spot_accents(self.img_rgb_original, n_accents=n)
+        if not found:
+            self.lbl_status.setText("⚪ No vivid accent found: image is nearly B/W. Pick manually if needed.")
+            return
+        for i in range(n):
+            self.spot_accents[i] = found[i] if i < len(found) else None
+        self._update_spot_swatch_colors()
+        self.lbl_status.setText(f"✅ {len(found)} accent(s) detected. Fine-tune by clicking the image.")
+        self._refresh_spot_mockup()
+
+    def _update_spot_swatch_colors(self):
+        for i, btn in enumerate(self.spot_swatches):
+            acc = self.spot_accents[i]
+            if acc is None:
+                btn.setText(f"Accent {i+1}: [ -- ]")
+                btn.setStyleSheet("")
+            else:
+                r, g, b = acc
+                lum = 0.299*r + 0.587*g + 0.114*b
+                text_color = "white" if lum < 128 else "black"
+                btn.setText(f"Accent {i+1}: RGB ({r}, {g}, {b})")
+                btn.setStyleSheet(f"background-color: rgb({r},{g},{b}); color: {text_color};")
+
+    def _on_spot_coverage_changed(self, value):
+        self.lbl_spot_coverage.setText(f"Accent Coverage: {value}%")
+        self._refresh_spot_mockup()
+
+    def _on_spot_mockup_toggled(self, checked):
+        if checked and getattr(self, 'img_rgb_original', None) is None:
+            self.btn_spot_mockup.setChecked(False)
+            return
+        if checked:
+            self._refresh_spot_mockup()
+            self.btn_spot_mockup.setText("👁 Back to Original")
+        else:
+            self.btn_spot_mockup.setText("👁 Mockup Preview")
+            self._update_viewport_mode(self.mode_selector.currentIndex())
+
+    def _refresh_spot_mockup(self):
+        """Ricalcola l'anteprima posterizzata (solo se il mockup è attivo)."""
+        if not self.btn_spot_mockup.isChecked():
+            return
+        if getattr(self, 'img_rgb_original', None) is None:
+            return
+        # A ~800px la classificazione è istantanea e l'anteprima resta fedele
+        small = downsample_for_analysis(self.img_rgb_original)
+        palette, idx = classify_spot_pixels(small, self._get_spot_accents(),
+                                            coverage=self.slider_spot_coverage.value())
+        self.spot_preview_array = np.array(palette, dtype=np.uint8)[idx]
+        self.viewer.setImage(self.spot_preview_array)
+        names = ", ".join(f"RGB{p}" for p in palette)
+        self.lbl_status.setText(f"👁 Mockup: {len(palette)} colors → {names}")
 
     def _get_rgb_filtered(self):
         """Filtro bilaterale RGB calcolato lazy alla prima richiesta (serve solo all'anteprima Topo)."""
@@ -244,11 +349,10 @@ class Manga3DAppController(MainWindowUI):
         # La versione RGB filtrata viene calcolata lazy da _get_rgb_filtered()
         self.img_rgb_filtered = None
 
-        # Display correct version based on mode
-        if self.mode_selector.currentIndex() == 1: # Topo
-            self.viewer.setImage(self._get_rgb_filtered())
-        else:
-            self.viewer.setImage(self.img_filtered_array)
+        # Display correct version based on mode (spegne anche un eventuale mockup attivo)
+        self.btn_spot_mockup.setChecked(False)
+        self.btn_spot_mockup.setEnabled(True)
+        self._update_viewport_mode(self.mode_selector.currentIndex())
 
         h, w = img.shape
         self.lbl_info.setText(f"Preview HD: {w} × {h} px\n{os.path.basename(file_path)}")
@@ -314,6 +418,24 @@ class Manga3DAppController(MainWindowUI):
             btn.style().polish(btn)
 
     def on_pixel_clicked(self, x, y):
+        # Ramo Spot Color: campionamento accento (ha priorità quando armato)
+        if (self.active_spot_swatch is not None
+                and getattr(self, 'img_rgb_original', None) is not None
+                and self.mode_selector.currentIndex() == 3):
+            idx = self.active_spot_swatch
+            self.active_spot_swatch = None
+            # In mockup il click deve campionare dall'originale, non dall'anteprima
+            if self.btn_spot_mockup.isChecked():
+                self.btn_spot_mockup.setChecked(False)
+                self.lbl_status.setText("🎯 Mockup off: click again on the ORIGINAL image to sample.")
+                self.active_spot_swatch = idx
+                return
+            self.spot_accents[idx] = self._sample_accent_at(x, y)
+            self._update_spot_swatch_colors()
+            self.lbl_status.setText(f"✅ Accent {idx+1} set to RGB {self.spot_accents[idx]}.")
+            self._refresh_spot_mockup()
+            return
+
         if self.active_swatch_index is not None and self.img_filtered_array is not None:
             val = int(self.img_filtered_array[y, x])
             idx = self.active_swatch_index
