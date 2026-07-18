@@ -414,6 +414,16 @@ class Manga3DAppController(MainWindowUI):
                 round(self.spin_z3.value(), 3),
             ]
 
+        # --- Validate topo colors BEFORE locking the UI (otherwise the app stays frozen) ---
+        is_topo = (self.mode_selector.currentIndex() == 1)
+        topo_colors = []
+        if is_topo:
+            for i in range(self.topo_color_list.count()):
+                topo_colors.append(self.topo_color_list.item(i).data(Qt.ItemDataRole.UserRole))
+            if not topo_colors:
+                QMessageBox.warning(self, "Error", "Please extract colors before generating.")
+                return
+
         # --- Lock UI ---
         self.toggle_ui_state(disabled=True)
         self.progress_bar.setValue(0)
@@ -428,14 +438,6 @@ class Manga3DAppController(MainWindowUI):
             max_res_cap = 1200
 
         # --- Launch background QThread ---
-        is_topo = (self.mode_selector.currentIndex() == 1)
-        topo_colors = []
-        if is_topo:
-            for i in range(self.topo_color_list.count()):
-                topo_colors.append(self.topo_color_list.item(i).data(Qt.ItemDataRole.UserRole))
-            if not topo_colors:
-                QMessageBox.warning(self, "Error", "Please extract colors before generating.")
-                return
 
         self.generation_start_time = time.time()
         
