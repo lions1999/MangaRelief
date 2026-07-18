@@ -51,6 +51,11 @@ class MeshWorker(QThread):
         self.source_image_name = source_image_name
         self.cancel_requested = False
 
+    def _check_cancel(self):
+        """Interrompe subito la pipeline se l'utente ha premuto Cancel."""
+        if self.cancel_requested:
+            raise InterruptedError("Process cancelled by user")
+
     def _prepare_image_data(self, img):
         """Optimizes resolution and applies Gaussian blur/Snap filters."""
         h, w = img.shape
@@ -227,7 +232,7 @@ class MeshWorker(QThread):
 
     def run(self):
         try:
-            if self.cancel_requested: raise InterruptedError("Process cancelled by user")
+            self._check_cancel()
             t_start_total = time.time()
             
             if self.is_topo_mode and self.topo_colors:
@@ -247,6 +252,7 @@ class MeshWorker(QThread):
                     max_dim=self.max_dim,
                     layer_height=self.layer_height
                 )
+                self._check_cancel()
                 self.progress.emit(80, "Optimizing Topo Mesh...")
                 
                 # In modalità Topo la mesh è già completa, saltiamo la pipeline standard
@@ -256,7 +262,8 @@ class MeshWorker(QThread):
                 # --- 1. Image Preparation ---
                 self.progress.emit(5, "Optimizing resolution for 3D mesh...")
                 img = self._prepare_image_data(self.img_filtered)
-            
+                self._check_cancel()
+
             if not goto_export:
                 # --- 2. Z-Mapping & Heightmap ---
                 self.progress.emit(20, "Applying Piecewise Interpolation (Z Mapping)...")
@@ -286,7 +293,8 @@ class MeshWorker(QThread):
                 
                 self.progress.emit(40, "Generating solid vertices (Watertight)...")
                 mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0)
-            
+                self._check_cancel()
+
                 # 2mm border logic removed as requested (handled by CAD template)
             # --- 4. Mesh Assembly ---
             self.progress.emit(55, "Finalizing Geometry...")
@@ -294,8 +302,10 @@ class MeshWorker(QThread):
             if self.is_deckbox_mode:
                 self.progress.emit(91, "Assembling Deckbox (Wall Replacement)...")
                 mesh = self._assemble_deckbox_mesh(mesh)
-            
+                self._check_cancel()
+
             # --- 5. Optimization (Decimation) ---
+            self._check_cancel()
             if self.smart_decimate and len(mesh.faces) > 200_000:
                 self.progress.emit(92, "Optimizing Mesh (Decimation)...")
                 target = 100_000 + min(50_000, int((len(mesh.faces) - 200_000) * 0.05))
@@ -309,8 +319,8 @@ class MeshWorker(QThread):
                 if not mesh.is_watertight:
                     trimesh.repair.fill_holes(mesh)
 
-            if self.cancel_requested: raise InterruptedError("Process cancelled by user")
-            
+            self._check_cancel()
+
             # --- 6. Final Clamping & Export ---
             self.progress.emit(95, "Finalizing and Exporting...")
             if not self.is_deckbox_mode:

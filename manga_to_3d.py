@@ -77,9 +77,19 @@ class Manga3DAppController(MainWindowUI):
             return
             
         if index == 1: # Topographic Mode
-            self.viewer.setImage(self.img_rgb_filtered)
+            self.viewer.setImage(self._get_rgb_filtered())
         else: # Standard Mode
             self.viewer.setImage(self.img_filtered_array)
+
+    def _get_rgb_filtered(self):
+        """Filtro bilaterale RGB calcolato lazy alla prima richiesta (serve solo all'anteprima Topo)."""
+        if getattr(self, 'img_rgb_filtered', None) is None:
+            if getattr(self, 'img_rgb_original', None) is None:
+                return None
+            self.lbl_status.setText("🛠 Applying Bilateral Filter (RGB)...")
+            QApplication.processEvents()
+            self.img_rgb_filtered = cv2.bilateralFilter(self.img_rgb_original, d=5, sigmaColor=50, sigmaSpace=50)
+        return self.img_rgb_filtered
 
     def _on_threshold_changed(self, value):
         self.lbl_threshold.setText(f"Halftone Threshold: {value}%")
@@ -231,11 +241,12 @@ class Manga3DAppController(MainWindowUI):
         self.lbl_status.setText("🛠 Applying Bilateral Filter...")
         QApplication.processEvents()
         self.img_filtered_array = cv2.bilateralFilter(img, d=5, sigmaColor=50, sigmaSpace=50)
-        self.img_rgb_filtered = cv2.bilateralFilter(self.img_rgb_original, d=5, sigmaColor=50, sigmaSpace=50)
+        # La versione RGB filtrata viene calcolata lazy da _get_rgb_filtered()
+        self.img_rgb_filtered = None
 
         # Display correct version based on mode
         if self.mode_selector.currentIndex() == 1: # Topo
-            self.viewer.setImage(self.img_rgb_filtered)
+            self.viewer.setImage(self._get_rgb_filtered())
         else:
             self.viewer.setImage(self.img_filtered_array)
 

@@ -4,6 +4,14 @@ from sklearn.cluster import KMeans
 
 def extract_dominant_colors(image_rgb: np.ndarray, n_colors: int = 5) -> list:
     """Estrae i colori dominanti e li ordina per luminosità (dal più scuro al più chiaro)."""
+    # Downsample prima del K-Means: sulle scansioni 4K i cluster non cambiano,
+    # ma il tempo di calcolo crolla e la UI non si congela
+    h, w = image_rgb.shape[:2]
+    max_size = 800
+    if max(h, w) > max_size:
+        scale = max_size / max(h, w)
+        image_rgb = cv2.resize(image_rgb, (int(w * scale), int(h * scale)),
+                               interpolation=cv2.INTER_AREA)
     pixels = image_rgb.reshape(-1, 3)
     # n_init='auto' per sopprimere warning e velocizzare
     kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init='auto').fit(pixels)
