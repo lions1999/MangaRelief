@@ -137,7 +137,7 @@ class MainWindowUI(QMainWindow):
         deckbox_layout = QVBoxLayout()
         self.combo_tcg_select = QComboBox()
         self.combo_tcg_select.setObjectName("combo_tcg_select")
-        self.combo_tcg_select.addItems(["Yu-Gi-Oh!", "Pokémon", "Magic", "One Piece"])
+        self.combo_tcg_select.addItems(["Yu-Gi-Oh!", "Pokémon", "Magic", "One Piece", "Hunter x Hunter"])
         deckbox_layout.addWidget(QLabel("Select TCG Game:"))
         deckbox_layout.addWidget(self.combo_tcg_select)
         self.group_deckbox.setLayout(deckbox_layout)

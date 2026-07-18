@@ -2,8 +2,30 @@ import cv2
 import numpy as np
 from sklearn.cluster import KMeans
 
-def extract_dominant_colors(image_rgb: np.ndarray, n_colors: int = 5) -> list:
-    """Estrae i colori dominanti e li ordina per luminosità (dal più scuro al più chiaro)."""
+# Peso della cromaticità (canali a/b) nel matching pixel->colore: con la distanza
+# Lab pura un grigio medio risulta più "vicino" a un rosso saturo che al nero,
+# perché la differenza di luminosità pesa quanto quella di tinta. Amplificando
+# a/b, un pixel senza tinta non può mai finire su un cluster saturo.
+CHROMA_MATCH_WEIGHT = 2.5
+
+def rgb_to_lab(rgb_array: np.ndarray, chroma_weight: float = 1.0) -> np.ndarray:
+    """Converte un array RGB uint8 (HxWx3 oppure Nx3) nello spazio Lab di OpenCV.
+    Le distanze in Lab rispecchiano la percezione umana, a differenza dell'RGB.
+    chroma_weight > 1 amplifica i canali a/b per il matching percettivo."""
+    arr = np.ascontiguousarray(rgb_array, dtype=np.uint8)
+    lab = cv2.cvtColor(arr.reshape(-1, 1, 3), cv2.COLOR_RGB2LAB)
+    lab = lab.reshape(arr.shape).astype(np.float32)
+    if chroma_weight != 1.0:
+        lab[..., 1:] *= chroma_weight
+    return lab
+
+def extract_dominant_colors(image_rgb: np.ndarray, n_colors: int = 5,
+                            merge_threshold: float = 25.0) -> list:
+    """Estrae i colori dominanti con K-Means in spazio Lab (percettivo) e li ordina
+    per luminosità dal più chiaro al più scuro (il primo in lista = base di stampa).
+    I cluster quasi identici vengono fusi: su immagini con pochi colori reali
+    (es. bianco/nero/rosso) K=5 creerebbe cluster spuri dai bordi anti-aliasing,
+    che in stampa finiscono su layer sbagliati."""
     # Downsample prima del K-Means: sulle scansioni 4K i cluster non cambiano,
     # ma il tempo di calcolo crolla e la UI non si congela
     h, w = image_rgb.shape[:2]
@@ -12,16 +34,45 @@ def extract_dominant_colors(image_rgb: np.ndarray, n_colors: int = 5) -> list:
         scale = max_size / max(h, w)
         image_rgb = cv2.resize(image_rgb, (int(w * scale), int(h * scale)),
                                interpolation=cv2.INTER_AREA)
-    pixels = image_rgb.reshape(-1, 3)
+
+    # Escludi i pixel di transizione (anti-aliasing e sfumature dei bordi):
+    # altrimenti il K-Means dedica interi cluster ai colori "misti" dei contorni,
+    # che poi in stampa emergono come terrazze fantasma dai layer sbagliati
+    grad = cv2.morphologyEx(image_rgb, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+    flat_mask = grad.max(axis=2) < 12
+    pixels_rgb = image_rgb.reshape(-1, 3)
+    if np.count_nonzero(flat_mask) > max(1000, flat_mask.size // 20):
+        pixels_rgb = pixels_rgb[flat_mask.ravel()]
+
+    pixels_lab = rgb_to_lab(pixels_rgb).reshape(-1, 3)
     # n_init='auto' per sopprimere warning e velocizzare
-    kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init='auto').fit(pixels)
-    colors = kmeans.cluster_centers_.astype(int)
-    
-    # Ordina i colori per luminosità percepita (Luminance)
+    kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init='auto').fit(pixels_lab)
+    centers_lab = kmeans.cluster_centers_
+    counts = np.bincount(kmeans.labels_, minlength=n_colors)
+
+    # Fusione pesata dei cluster più vicini di merge_threshold (in unità Lab OpenCV)
+    merged = []  # coppie [somma pesata dei centri, peso totale]
+    for idx in np.argsort(-counts):  # dal cluster più popoloso
+        center, weight = centers_lab[idx], float(counts[idx])
+        for m in merged:
+            if np.linalg.norm(m[0] / m[1] - center) < merge_threshold:
+                m[0] += center * weight
+                m[1] += weight
+                break
+        else:
+            merged.append([center * weight, weight])
+    centers_lab = np.array([m[0] / m[1] for m in merged])
+
+    colors = cv2.cvtColor(
+        np.clip(centers_lab, 0, 255).astype(np.uint8).reshape(-1, 1, 3),
+        cv2.COLOR_LAB2RGB
+    ).reshape(-1, 3).astype(int)
+
+    # Ordina per luminosità percepita, dal più chiaro (base) al più scuro
     luminances = [0.299*c[0] + 0.587*c[1] + 0.114*c[2] for c in colors]
-    sorted_indices = np.argsort(luminances)
+    sorted_indices = np.argsort(luminances)[::-1]
     sorted_colors = colors[sorted_indices]
-    
+
     return [tuple(c) for c in sorted_colors]
 
 def suggest_midtones(image):

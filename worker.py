@@ -18,10 +18,11 @@ class MeshWorker(QThread):
 
     # Mapping TCG game names → logo asset filenames (class-level: shared across all instances)
     TCG_LOGO_MAP = {
-        'Yu-Gi-Oh!': 'yugioh_logo.jpg',
-        'Pokémon':   'pokemon_logo.jpg',
-        'Magic':     'magic_logo.jpg',
-        'One Piece': 'onepiece_logo.jpg',
+        'Yu-Gi-Oh!':       'yugioh_logo.jpg',
+        'Pokémon':         'pokemon_logo.jpg',
+        'Magic':           'magic_logo.jpg',
+        'One Piece':       'onepiece_logo.jpg',
+        'Hunter x Hunter': 'hxh_logo.jpg',
     }
 
     def __init__(self, img_filtered, sampled_values, max_dim, max_h, base_h,

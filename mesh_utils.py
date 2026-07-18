@@ -8,6 +8,7 @@ from scipy.spatial import cKDTree
 from scipy.ndimage import median_filter
 
 from config import SLOT_COLORS_3MF
+from color_utils import rgb_to_lab, CHROMA_MATCH_WEIGHT
 
 def create_solid_mesh(X, Y, Z, bottom_z=0.0):
     """
@@ -102,9 +103,12 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
     # --- LAYER QUANTISATION ---
     exact_z_heights = compute_topo_z_heights(base_z, total_z, layer_height, n_colors)
 
-    # Mappa pixel ai colori tramite cKDTree (velocissimo)
-    tree = cKDTree(sorted_colors_rgb)
-    pixels_flat = image_rgb.reshape(-1, 3)
+    # Mappa pixel ai colori tramite cKDTree in spazio Lab percettivo: con la
+    # distanza RGB i grigi di anti-aliasing venivano assegnati ai rossi scuri,
+    # facendo "sbucare" colori dai layer sbagliati
+    tree = cKDTree(rgb_to_lab(np.array(sorted_colors_rgb, dtype=np.uint8),
+                              chroma_weight=CHROMA_MATCH_WEIGHT))
+    pixels_flat = rgb_to_lab(image_rgb, chroma_weight=CHROMA_MATCH_WEIGHT).reshape(-1, 3)
     _, indices = tree.query(pixels_flat)
     indices = indices.reshape(h, w)
 
