@@ -5,7 +5,8 @@ import numpy as np
 import trimesh
 from PIL import Image
 from scipy.spatial import cKDTree
-from scipy.ndimage import median_filter
+from scipy.ndimage import (median_filter, label, binary_erosion,
+                           distance_transform_edt)
 
 from config import SLOT_COLORS_3MF
 from color_utils import rgb_to_lab, CHROMA_MATCH_WEIGHT
@@ -128,6 +129,41 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
     # (pixel isolati). Alle risoluzioni alte il kernel scende a 3 per non mangiare
     # le linee fini (a 800px un kernel 5 cancella dettagli sotto ~1.5mm di stampa)
     indices = median_filter(indices, size=5 if max(h, w) <= 800 else 3)
+
+    # --- Pulizia per dimensione minima stampabile (~ugello 0.4mm) ---
+    # 1) isole più piccole dell'area di un punto da 0.5mm -> riassegnate al colore
+    #    circostante (pulviscolo, per tutti i colori)
+    # 2) solo per i colori saturi: componenti senza "nucleo", cioè più strette di
+    #    0.5mm ovunque (le frange di ringing JPEG lungo i bordi neri) -> riassegnate.
+    #    I colori neutri sono esclusi per preservare le linee fini bianche/nere.
+    MIN_FEATURE_MM = 0.5
+    pitch = max_dim / max(h, w)  # mm per pixel
+    radius_px = max(1, int((MIN_FEATURE_MM / 2.0) / pitch))
+    min_area_px = max(2, int(np.pi * ((MIN_FEATURE_MM / 2.0) / pitch) ** 2))
+    colors_lab = rgb_to_lab(np.array(sorted_colors_rgb, dtype=np.uint8))
+    is_chromatic = np.max(np.abs(colors_lab[:, 1:] - 128.0), axis=1) > 12.0
+
+    structure = np.ones((3, 3), dtype=bool)
+    remove_mask = np.zeros((h, w), dtype=bool)
+    for i in range(n_colors):
+        mask_i = (indices == i)
+        labels, n_labels = label(mask_i, structure=structure)
+        if n_labels == 0:
+            continue
+        sizes = np.bincount(labels.ravel(), minlength=n_labels + 1)
+        drop = sizes < min_area_px
+        if is_chromatic[i]:
+            core = binary_erosion(mask_i, structure=structure, iterations=radius_px)
+            has_core = np.zeros(n_labels + 1, dtype=bool)
+            has_core[np.unique(labels[core])] = True
+            drop |= ~has_core
+        drop[0] = False
+        if drop.any():
+            remove_mask |= drop[labels]
+    if remove_mask.any() and not remove_mask.all():
+        nearest = distance_transform_edt(remove_mask, return_distances=False,
+                                         return_indices=True)
+        indices = indices[nearest[0], nearest[1]]
 
     # Costruisci heightmap discreta usando le altezze quantizzate
     Z = np.zeros((h, w), dtype=np.float32)
