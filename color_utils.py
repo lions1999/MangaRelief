@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from sklearn.cluster import KMeans
+from scipy.spatial import cKDTree
 
 # Peso della cromaticità (canali a/b) nel matching pixel->colore: con la distanza
 # Lab pura un grigio medio risulta più "vicino" a un rosso saturo che al nero,
@@ -19,6 +20,34 @@ def rgb_to_lab(rgb_array: np.ndarray, chroma_weight: float = 1.0) -> np.ndarray:
         lab[..., 1:] *= chroma_weight
     return lab
 
+def downsample_for_analysis(image_rgb: np.ndarray, max_size: int = 800) -> np.ndarray:
+    """Riduce l'immagine per le analisi colore: i cluster non cambiano,
+    ma i tempi di calcolo crollano e la UI non si congela."""
+    h, w = image_rgb.shape[:2]
+    if max(h, w) > max_size:
+        scale = max_size / max(h, w)
+        image_rgb = cv2.resize(image_rgb, (int(w * scale), int(h * scale)),
+                               interpolation=cv2.INTER_AREA)
+    return image_rgb
+
+def merge_lab_clusters(centers_lab: np.ndarray, counts: np.ndarray,
+                       merge_threshold: float = 25.0):
+    """Fusione pesata dei cluster Lab più vicini di merge_threshold.
+    Ritorna (centri fusi, pesi totali), dal cluster più popoloso."""
+    merged = []  # coppie [somma pesata dei centri, peso totale]
+    for idx in np.argsort(-counts):
+        center, weight = centers_lab[idx], float(counts[idx])
+        for m in merged:
+            if np.linalg.norm(m[0] / m[1] - center) < merge_threshold:
+                m[0] += center * weight
+                m[1] += weight
+                break
+        else:
+            merged.append([center * weight, weight])
+    centers = np.array([m[0] / m[1] for m in merged])
+    weights = np.array([m[1] for m in merged])
+    return centers, weights
+
 def extract_dominant_colors(image_rgb: np.ndarray, n_colors: int = 5,
                             merge_threshold: float = 25.0) -> list:
     """Estrae i colori dominanti con K-Means in spazio Lab (percettivo) e li ordina
@@ -26,14 +55,7 @@ def extract_dominant_colors(image_rgb: np.ndarray, n_colors: int = 5,
     I cluster quasi identici vengono fusi: su immagini con pochi colori reali
     (es. bianco/nero/rosso) K=5 creerebbe cluster spuri dai bordi anti-aliasing,
     che in stampa finiscono su layer sbagliati."""
-    # Downsample prima del K-Means: sulle scansioni 4K i cluster non cambiano,
-    # ma il tempo di calcolo crolla e la UI non si congela
-    h, w = image_rgb.shape[:2]
-    max_size = 800
-    if max(h, w) > max_size:
-        scale = max_size / max(h, w)
-        image_rgb = cv2.resize(image_rgb, (int(w * scale), int(h * scale)),
-                               interpolation=cv2.INTER_AREA)
+    image_rgb = downsample_for_analysis(image_rgb)
 
     # Escludi i pixel di transizione (anti-aliasing e sfumature dei bordi):
     # altrimenti il K-Means dedica interi cluster ai colori "misti" dei contorni,
@@ -47,21 +69,9 @@ def extract_dominant_colors(image_rgb: np.ndarray, n_colors: int = 5,
     pixels_lab = rgb_to_lab(pixels_rgb).reshape(-1, 3)
     # n_init='auto' per sopprimere warning e velocizzare
     kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init='auto').fit(pixels_lab)
-    centers_lab = kmeans.cluster_centers_
-    counts = np.bincount(kmeans.labels_, minlength=n_colors)
-
-    # Fusione pesata dei cluster più vicini di merge_threshold (in unità Lab OpenCV)
-    merged = []  # coppie [somma pesata dei centri, peso totale]
-    for idx in np.argsort(-counts):  # dal cluster più popoloso
-        center, weight = centers_lab[idx], float(counts[idx])
-        for m in merged:
-            if np.linalg.norm(m[0] / m[1] - center) < merge_threshold:
-                m[0] += center * weight
-                m[1] += weight
-                break
-        else:
-            merged.append([center * weight, weight])
-    centers_lab = np.array([m[0] / m[1] for m in merged])
+    centers_lab, _ = merge_lab_clusters(kmeans.cluster_centers_,
+                                        np.bincount(kmeans.labels_, minlength=n_colors),
+                                        merge_threshold)
 
     colors = cv2.cvtColor(
         np.clip(centers_lab, 0, 255).astype(np.uint8).reshape(-1, 1, 3),
