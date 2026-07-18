@@ -19,3 +19,8 @@ class DeckboxConfig:
 
 # Filament slot colours injected into Bambu Studio 3MF metadata (Light → Dark)
 SLOT_COLORS_3MF = ["#C8C8C8", "#646464", "#000000", "#1a1a1a"]
+
+# Spot Color mode: ruoli neutri fissi della palette (base chiara e top scuro).
+# Gli accenti scelti dall'utente si inseriscono tra questi due estremi.
+SPOT_BASE_RGB = (245, 245, 245)
+SPOT_TOP_RGB  = (20, 20, 20)
