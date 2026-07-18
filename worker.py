@@ -65,7 +65,11 @@ class MeshWorker(QThread):
         img = cv2.GaussianBlur(img, (5, 5), 0)
         
         if self.color_mode == 2:
-            _, img = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
+            # Soglia dinamica: punto medio tra il bianco (L0) e il nero (L3) campionati,
+            # così la calibrazione degli swatch conta anche in modalità B&N
+            bw_threshold = int((self.sampled_values[0] + self.sampled_values[3]) / 2.0)
+            bw_threshold = int(np.clip(bw_threshold, 1, 254))
+            _, img = cv2.threshold(img, bw_threshold, 255, cv2.THRESH_BINARY)
         else:
             if self.color_mode == 3:
                 targets = np.array([0, self.sampled_values[2], 255])

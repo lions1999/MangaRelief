@@ -172,9 +172,12 @@ def export_3mf(mesh, output_path_3mf, color_changes_z):
     src_buf.seek(0)
 
     # 2. Build custom_gcode_per_layer.xml layer nodes
+    # Scarta i livelli non usati (z=0 nelle modalità 2/3 colori) e i duplicati,
+    # altrimenti Bambu Studio riceve cambi colore fantasma al layer 0
     slot_colors = SLOT_COLORS_3MF
     layer_nodes = ""
-    for i, z in enumerate(sorted(color_changes_z)):
+    valid_z = sorted({round(z, 4) for z in color_changes_z if z > 0})
+    for i, z in enumerate(valid_z):
         extruder = i + 2
         color    = slot_colors[i] if i < len(slot_colors) else "#000000"
         layer_nodes += (
