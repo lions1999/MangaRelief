@@ -121,10 +121,11 @@ def _create_masked_solid_mesh(X, Y, Z, bottom_z, mask):
 
 
 def rounded_rect_mask(h: int, w: int, radius_px: float,
-                      hole=None, hole_radius_px: float = 0.0) -> np.ndarray:
-    """Maschera booleana HxW a rettangolo con angoli arrotondati, meno un
-    eventuale foro (anch'esso rounded-rect). hole = (x0, y0, w_px, h_px) in
-    coordinate pixel. È la sagoma base della back plate per cover telefono."""
+                      holes=None) -> np.ndarray:
+    """Maschera booleana HxW a rettangolo con angoli arrotondati, meno una
+    lista di fori rounded-rect. holes = [(x0, y0, w_px, h_px, r_px), ...] in
+    coordinate pixel (un cerchio è il caso w=h=2r). È la sagoma della back
+    plate per cover telefono: fori fotocamera/flash inclusi."""
     yy, xx = np.mgrid[0:h, 0:w]
 
     def _rrect(x0, y0, x1, y1, r):
@@ -138,9 +139,8 @@ def rounded_rect_mask(h: int, w: int, radius_px: float,
         return m
 
     m = _rrect(0, 0, w - 1, h - 1, radius_px)
-    if hole is not None:
-        hx, hy, hw_, hh_ = hole
-        m &= ~_rrect(hx, hy, hx + hw_, hy + hh_, hole_radius_px)
+    for hx, hy, hw_, hh_, hr in (holes or []):
+        m &= ~_rrect(hx, hy, hx + hw_, hy + hh_, hr)
     return m
 
 

@@ -48,11 +48,17 @@ def build_bumper(phone_w: float, phone_h: float, phone_t: float, corner_r: float
                  groove_depth: float = 1.0, groove_h: float = 1.4,
                  front_lip_w: float = 1.2, screen_guard_t: float = 1.0,
                  bottom_opening_w: float = 45.0,
-                 side_cutouts=()) -> trimesh.Trimesh:
+                 side_cutouts=(), top_cutouts=()) -> trimesh.Trimesh:
     """Genera il bumper TPU. Origine al centro, Z=0 sul retro (lato plate).
+
+    CONVENZIONE: lati e distanze sono espressi GUARDANDO IL RETRO del telefono
+    (la stessa vista dell'artwork sulla plate). Nello spazio del modello la X
+    risulta quindi specchiata: 'left' visto dal retro = +X del modello.
 
     side_cutouts: sequenza di (lato, distanza_dal_top, lunghezza) con lato in
     {'left','right'}, per lasciare scoperti bottoni/slider.
+    top_cutouts: sequenza di (distanza_da_sinistra, lunghezza) di aperture sul
+    bordo superiore (microfoni/IR).
     """
     z_a = back_lip_t                    # fine cornice posteriore
     z_b = z_a + groove_h                # fine scanalatura plate
@@ -91,10 +97,15 @@ def build_bumper(phone_w: float, phone_h: float, phone_t: float, corner_r: float
     for side, from_top, length in side_cutouts:
         y1 = cav_h / 2 - from_top
         y0 = y1 - length
+        # vista dal retro: 'left' cade sul lato +X del modello
         if side == 'left':
-            cuts.append(_cut_box(-half_w - 1, -(cav_w / 2 - 2), y0, y1, z_b, z_top + 1))
-        else:
             cuts.append(_cut_box(cav_w / 2 - 2, half_w + 1, y0, y1, z_b, z_top + 1))
+        else:
+            cuts.append(_cut_box(-half_w - 1, -(cav_w / 2 - 2), y0, y1, z_b, z_top + 1))
+    for from_left, length in top_cutouts:
+        x1 = cav_w / 2 - from_left          # specchiatura back-view
+        x0 = x1 - length
+        cuts.append(_cut_box(x0, x1, cav_h / 2 - 2, half_h + 1, z_b, z_top + 1))
     if cuts:
         bumper = trimesh.boolean.difference(
             [bumper, trimesh.boolean.union(cuts, engine='manifold')], engine='manifold')
