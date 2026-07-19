@@ -1,20 +1,187 @@
 {
-  "_note": "Coordinate espresse GUARDANDO IL RETRO del telefono, origine bordo alto-sinistro del corpo. camera_holes: fori della back plate (x0, y0 = angolo alto-sinistro del foro). Nord 3: misure estratte da una cover collaudata; iPhone 17: finestra indicativa da verificare.",
+  "_note": "Coordinate espresse GUARDANDO IL RETRO del telefono, origine bordo alto-sinistro del corpo. camera_holes: fori della back plate (x0, y0 = angolo alto-sinistro del foro). Nord 3: misure estratte da una cover collaudata; iPhone 17: finestra indicativa da verificare. case_plate: sede ricavata da una cover reale (template in assets); se presente, plate e companion usano quella al posto del sistema parametrico.",
   "OnePlus Nord 3 5G": {
     "width": 75.1,
     "height": 162.6,
     "thickness": 8.2,
     "corner_radius": 9.0,
     "camera_holes": [
-      {"x": 7.15, "y": 6.4, "w": 21.0, "h": 21.0, "r": 10.5},
-      {"x": 7.15, "y": 31.7, "w": 21.0, "h": 21.0, "r": 10.5},
-      {"x": 32.0, "y": 12.8, "w": 8.1, "h": 8.1, "r": 4.05},
-      {"x": 31.7, "y": 38.1, "w": 8.0, "h": 8.0, "r": 4.0}
+      {
+        "x": 7.15,
+        "y": 6.4,
+        "w": 21.0,
+        "h": 21.0,
+        "r": 10.5
+      },
+      {
+        "x": 7.15,
+        "y": 31.7,
+        "w": 21.0,
+        "h": 21.0,
+        "r": 10.5
+      },
+      {
+        "x": 32.0,
+        "y": 12.8,
+        "w": 8.1,
+        "h": 8.1,
+        "r": 4.05
+      },
+      {
+        "x": 31.7,
+        "y": 38.1,
+        "w": 8.0,
+        "h": 8.0,
+        "r": 4.0
+      }
     ],
-    "side_cutouts": [["left", 20.0, 15.5]],
-    "top_cutouts": [[29.0, 4.0], [45.0, 5.0]],
+    "side_cutouts": [
+      [
+        "left",
+        20.0,
+        15.5
+      ]
+    ],
+    "top_cutouts": [
+      [
+        29.0,
+        4.0
+      ],
+      [
+        45.0,
+        5.0
+      ]
+    ],
     "bottom_opening": 45.0,
-    "_todo": "tasti volume/accensione: nella cover di riferimento sono coperti a membrana; misurare posizione dal top e aggiungere un side_cutout"
+    "_todo": "tasti volume/accensione: nella cover di riferimento sono coperti a membrana; misurare posizione dal top e aggiungere un side_cutout",
+    "case_plate": {
+      "width": 71.39,
+      "height": 159.99,
+      "thickness": 1.0,
+      "outline": [
+        [
+          43.29,
+          0.0
+        ],
+        [
+          42.65,
+          0.26
+        ],
+        [
+          42.39,
+          0.9
+        ],
+        [
+          42.39,
+          50.22
+        ],
+        [
+          42.03,
+          51.42
+        ],
+        [
+          41.09,
+          52.2
+        ],
+        [
+          40.24,
+          52.36
+        ],
+        [
+          0.89,
+          52.36
+        ],
+        [
+          0.25,
+          52.62
+        ],
+        [
+          0.0,
+          53.08
+        ],
+        [
+          0.0,
+          153.51
+        ],
+        [
+          0.36,
+          155.34
+        ],
+        [
+          1.43,
+          157.31
+        ],
+        [
+          3.08,
+          158.84
+        ],
+        [
+          5.13,
+          159.76
+        ],
+        [
+          6.93,
+          159.99
+        ],
+        [
+          64.97,
+          159.97
+        ],
+        [
+          67.15,
+          159.45
+        ],
+        [
+          69.01,
+          158.3
+        ],
+        [
+          70.44,
+          156.56
+        ],
+        [
+          71.16,
+          154.85
+        ],
+        [
+          71.39,
+          153.04
+        ],
+        [
+          71.39,
+          6.95
+        ],
+        [
+          71.26,
+          5.58
+        ],
+        [
+          70.66,
+          3.82
+        ],
+        [
+          69.38,
+          2.04
+        ],
+        [
+          67.91,
+          0.91
+        ],
+        [
+          65.86,
+          0.14
+        ],
+        [
+          64.44,
+          0.0
+        ],
+        [
+          43.29,
+          0.0
+        ]
+      ],
+      "template": "template_nord3_case_carved.stl"
+    }
   },
   "iPhone 17": {
     "width": 71.5,
@@ -22,9 +189,26 @@
     "thickness": 7.95,
     "corner_radius": 11.0,
     "camera_holes": [
-      {"x": 4.0, "y": 4.0, "w": 34.0, "h": 34.0, "r": 11.0}
+      {
+        "x": 4.0,
+        "y": 4.0,
+        "w": 34.0,
+        "h": 34.0,
+        "r": 11.0
+      }
     ],
-    "side_cutouts": [["right", 25.0, 35.0], ["left", 20.0, 40.0]],
+    "side_cutouts": [
+      [
+        "right",
+        25.0,
+        35.0
+      ],
+      [
+        "left",
+        20.0,
+        40.0
+      ]
+    ],
     "top_cutouts": [],
     "bottom_opening": 45.0
   }

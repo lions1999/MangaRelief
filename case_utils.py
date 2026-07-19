@@ -274,3 +274,20 @@ def compose_plate_art(image_rgb, preset: dict, mask, res: float,
                                       offset_x_mm=off_x, offset_y_mm=off_y,
                                       fill_rgb=fill_rgb)
     return art
+
+
+def build_case_plate_raster(preset: dict, max_res_cap: int = 1200):
+    """Raster della plate per i preset con 'case_plate' (sede ricavata da una
+    cover reale): la sagoma è il poligono misurato, fotocamera già esclusa.
+    Ritorna (mask, res_mm_per_px, dims) come build_plate_raster."""
+    import cv2
+
+    cp = preset['case_plate']
+    W, H = cp['width'], cp['height']
+    res = max(W, H) / float(max_res_cap)
+    w_px, h_px = int(round(W / res)), int(round(H / res))
+    pts = np.round(np.array(cp['outline'], dtype=np.float64) / res).astype(np.int32)
+    mask_u8 = np.zeros((h_px, w_px), dtype=np.uint8)
+    cv2.fillPoly(mask_u8, [pts], 255)
+    dims = {'width': W, 'height': H, 'max_thickness': cp['thickness']}
+    return mask_u8 > 0, res, dims

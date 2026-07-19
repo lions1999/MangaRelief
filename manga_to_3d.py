@@ -18,7 +18,8 @@ from color_utils import (extract_dominant_colors, suggest_midtones,
                          suggest_spot_accents, classify_spot_pixels,
                          downsample_for_analysis, build_spot_palette)
 from mesh_utils import compute_topo_z_heights, compute_topo_switch_z
-from case_utils import load_phone_presets, build_plate_raster, compose_plate_art
+from case_utils import (load_phone_presets, build_plate_raster,
+                        build_case_plate_raster, compose_plate_art)
 from worker import MeshWorker
 
 # Abilitiamo i plugin HEIF e AVIF in caso di fallimento OpenCV
@@ -92,7 +93,7 @@ class Manga3DAppController(MainWindowUI):
         self.slider_cover_scale.valueChanged.connect(self._on_cover_param_changed)
         self.slider_cover_offx.valueChanged.connect(self._on_cover_param_changed)
         self.slider_cover_offy.valueChanged.connect(self._on_cover_param_changed)
-        self.combo_phone_model.currentIndexChanged.connect(lambda _: self._refresh_cover_preview())
+        self.combo_phone_model.currentIndexChanged.connect(self._on_phone_model_changed)
         self.chk_cover_avoid_camera.toggled.connect(lambda _: self._refresh_cover_preview())
         self.mode_selector.currentIndexChanged.connect(self._on_mode_defaults)
 
@@ -136,6 +137,12 @@ class Manga3DAppController(MainWindowUI):
             self.spin_maxh.setValue(1.0)
             self.spin_layer_height.setValue(0.10)
 
+    def _on_phone_model_changed(self, _index):
+        preset = self._current_phone_preset() or {}
+        # Con la sede reale la fotocamera è già fuori sagoma: il toggle non serve
+        self.chk_cover_avoid_camera.setEnabled('case_plate' not in preset)
+        self._refresh_cover_preview()
+
     def _current_phone_preset(self):
         name = self.combo_phone_model.currentText()
         return self.phone_presets.get(name)
@@ -145,13 +152,19 @@ class Manga3DAppController(MainWindowUI):
         preset = self._current_phone_preset()
         if preset is None or getattr(self, 'img_rgb_original', None) is None:
             return None
-        mask, res, _ = build_plate_raster(preset, max_res_cap=max_res_cap)
+        if 'case_plate' in preset:
+            # sede reale ricavata dalla cover template: fotocamera già esclusa
+            mask, res, _ = build_case_plate_raster(preset, max_res_cap=max_res_cap)
+            avoid = False
+        else:
+            mask, res, _ = build_plate_raster(preset, max_res_cap=max_res_cap)
+            avoid = self.chk_cover_avoid_camera.isChecked()
         art = compose_plate_art(
             self.img_rgb_original, preset, mask, res,
             user_scale=self.slider_cover_scale.value() / 100.0,
             off_x=float(self.slider_cover_offx.value()),
             off_y=float(self.slider_cover_offy.value()),
-            avoid_camera=self.chk_cover_avoid_camera.isChecked())
+            avoid_camera=avoid)
         return art, mask, res
 
     def _on_cover_param_changed(self, _value):
@@ -604,25 +617,27 @@ class Manga3DAppController(MainWindowUI):
         # --- Auto-compute output paths (no user prompt) ---
         base_dir = os.path.dirname(self.loaded_image_path)
         base_name = os.path.splitext(os.path.basename(self.loaded_image_path))[0]
-        
+        # In modalità cover i file si chiamano cover_plate_<nome> (+ cover_bumper_<nome>)
+        file_stem = f"cover_plate_{base_name}" if is_cover else f"{base_name}_3D"
+
         save_path_stl = None
         if export_stl:
             output_dir_stl = os.path.join(base_dir, "output", "stl")
             os.makedirs(output_dir_stl, exist_ok=True)
-            save_path_stl = os.path.join(output_dir_stl, f"{base_name}_3D.stl")
+            save_path_stl = os.path.join(output_dir_stl, f"{file_stem}.stl")
             counter = 1
             while os.path.exists(save_path_stl):
-                save_path_stl = os.path.join(output_dir_stl, f"{base_name}_3D_{counter}.stl")
+                save_path_stl = os.path.join(output_dir_stl, f"{file_stem}_{counter}.stl")
                 counter += 1
 
         save_path_3mf = None
         if export_3mf:
             output_dir_3mf = os.path.join(base_dir, "output", "3mf")
             os.makedirs(output_dir_3mf, exist_ok=True)
-            save_path_3mf = os.path.join(output_dir_3mf, f"{base_name}_3D.3mf")
+            save_path_3mf = os.path.join(output_dir_3mf, f"{file_stem}.3mf")
             counter = 1
             while os.path.exists(save_path_3mf):
-                save_path_3mf = os.path.join(output_dir_3mf, f"{base_name}_3D_{counter}.3mf")
+                save_path_3mf = os.path.join(output_dir_3mf, f"{file_stem}_{counter}.3mf")
                 counter += 1
 
         # --- Compute or read color-change Z heights ---
@@ -856,8 +871,8 @@ class Manga3DAppController(MainWindowUI):
                 msg += f"🎨 3MF → {path_3mf}\n"
             if (self.mode_selector.currentIndex() == 4 and self.chk_cover_bumper.isChecked()
                     and (stl_path or path_3mf)):
-                bumper_path = os.path.splitext(stl_path or path_3mf)[0] + "_bumper_TPU.stl"
-                msg += f"🧷 Bumper (stampa in TPU) → {bumper_path}\n"
+                companion = MeshWorker.companion_path_for(stl_path or path_3mf)
+                msg += f"🧷 Cover/Bumper (stampa in TPU) → {companion}\n"
             
         msg += f"\n⏱️ Time elapsed: {time_str}\n\n"
         

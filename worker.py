@@ -11,7 +11,10 @@ from config import DeckboxConfig
 from mesh_utils import (create_solid_mesh, process_mesh_topo, export_3mf,
                         compute_topo_z_heights, compute_topo_switch_z)
 from color_utils import classify_spot_pixels, downsample_for_analysis
-from case_utils import build_plate_raster, compose_plate_art, build_bumper
+import shutil
+
+from case_utils import (build_plate_raster, build_case_plate_raster,
+                        compose_plate_art, build_bumper)
 from utils import resource_path
 
 class MeshWorker(QThread):
@@ -69,6 +72,18 @@ class MeshWorker(QThread):
         self.include_bumper = include_bumper
         self.cover_avoid_camera = cover_avoid_camera
         self.cancel_requested = False
+
+    @staticmethod
+    def companion_path_for(plate_path: str) -> str:
+        """Percorso del bumper/case TPU accanto alla plate:
+        cover_plate_<nome>.* -> cover_bumper_<nome>.stl"""
+        d = os.path.dirname(plate_path)
+        stem = os.path.splitext(os.path.basename(plate_path))[0]
+        if stem.startswith("cover_plate_"):
+            stem = stem.replace("cover_plate_", "cover_bumper_", 1)
+        else:
+            stem += "_bumper_TPU"
+        return os.path.join(d, stem + ".stl")
 
     def _check_cancel(self):
         """Interrompe subito la pipeline se l'utente ha premuto Cancel."""
@@ -266,11 +281,16 @@ class MeshWorker(QThread):
                     img_rgb_src = cv2.cvtColor(self.img_filtered, cv2.COLOR_GRAY2RGB)
                 else:
                     img_rgb_src = self.img_filtered
-                plate_mask, res, pd = build_plate_raster(self.cover_preset, self.max_res_cap)
+                if 'case_plate' in self.cover_preset:
+                    plate_mask, res, pd = build_case_plate_raster(self.cover_preset, self.max_res_cap)
+                    avoid = False  # la sede reale esclude già la fotocamera
+                else:
+                    plate_mask, res, pd = build_plate_raster(self.cover_preset, self.max_res_cap)
+                    avoid = self.cover_avoid_camera
                 art = compose_plate_art(img_rgb_src, self.cover_preset, plate_mask, res,
                                         user_scale=self.cover_scale,
                                         off_x=self.cover_off_x, off_y=self.cover_off_y,
-                                        avoid_camera=self.cover_avoid_camera)
+                                        avoid_camera=avoid)
                 accents = self.spot_accents if self.cover_finish_spot else []
                 palette, idx_map = classify_spot_pixels(art, accents,
                                                         coverage=self.spot_coverage)
@@ -449,16 +469,23 @@ class MeshWorker(QThread):
                                slot_colors=export_slot_colors)
 
                 if self.is_cover_mode and self.include_bumper and self.cover_preset:
-                    self.progress.emit(99, "Generating TPU bumper (separate STL)...")
-                    p = self.cover_preset
-                    bumper = build_bumper(
-                        p['width'], p['height'], p['thickness'], p['corner_radius'],
-                        bottom_opening_w=p.get('bottom_opening', 45.0),
-                        side_cutouts=[tuple(c) for c in p.get('side_cutouts', [])],
-                        top_cutouts=[tuple(c) for c in p.get('top_cutouts', [])])
                     ref = self.output_path or self.output_path_3mf
-                    bumper_path = os.path.splitext(ref)[0] + "_bumper_TPU.stl"
-                    bumper.export(bumper_path)
+                    companion_path = self.companion_path_for(ref)
+                    case_plate = self.cover_preset.get('case_plate') or {}
+                    if case_plate.get('template'):
+                        # sede reale: il companion è la cover scavata (template)
+                        self.progress.emit(99, "Copying carved case (TPU) next to the plate...")
+                        src = resource_path(os.path.join("assets", case_plate['template']))
+                        shutil.copyfile(src, companion_path)
+                    else:
+                        self.progress.emit(99, "Generating TPU bumper (separate STL)...")
+                        p = self.cover_preset
+                        bumper = build_bumper(
+                            p['width'], p['height'], p['thickness'], p['corner_radius'],
+                            bottom_opening_w=p.get('bottom_opening', 45.0),
+                            side_cutouts=[tuple(c) for c in p.get('side_cutouts', [])],
+                            top_cutouts=[tuple(c) for c in p.get('top_cutouts', [])])
+                        bumper.export(companion_path)
                 
                 self.progress.emit(100, "Export completed!")
                 self.finished_ok.emit(self.output_path or "", self.output_path_3mf or "")
