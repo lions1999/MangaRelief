@@ -18,6 +18,7 @@ from color_utils import (extract_dominant_colors, suggest_midtones,
                          suggest_spot_accents, classify_spot_pixels,
                          downsample_for_analysis, build_spot_palette)
 from mesh_utils import compute_topo_z_heights, compute_topo_switch_z
+from case_utils import load_phone_presets, build_plate_raster, compose_cover_art
 from worker import MeshWorker
 
 # Abilitiamo i plugin HEIF e AVIF in caso di fallimento OpenCV
@@ -53,6 +54,15 @@ class Manga3DAppController(MainWindowUI):
         self.spot_accents = [None, None]
         self.active_spot_swatch = None
 
+        # Phone Cover state
+        try:
+            self.phone_presets = {k: v for k, v in load_phone_presets().items()
+                                  if not k.startswith('_')}
+        except Exception as e:
+            print(f"Warning: phone presets not loaded ({e})")
+            self.phone_presets = {}
+        self.combo_phone_model.addItems(list(self.phone_presets.keys()))
+
         self.setup_connections()
         self.update_swatch_colors()
         self._refresh_auto_z_display()
@@ -77,6 +87,14 @@ class Manga3DAppController(MainWindowUI):
         self.spin_maxh.valueChanged.connect(self._on_physical_param_changed)
         self.spin_layer_height.valueChanged.connect(self._on_physical_param_changed)
 
+        # Phone Cover
+        self.btn_cover_preview.toggled.connect(self._on_cover_preview_toggled)
+        self.slider_cover_scale.valueChanged.connect(self._on_cover_param_changed)
+        self.slider_cover_offx.valueChanged.connect(self._on_cover_param_changed)
+        self.slider_cover_offy.valueChanged.connect(self._on_cover_param_changed)
+        self.combo_phone_model.currentIndexChanged.connect(lambda _: self._refresh_cover_preview())
+        self.mode_selector.currentIndexChanged.connect(self._on_mode_defaults)
+
         # Spot Color
         self.btn_spot_auto.clicked.connect(self._apply_spot_auto)
         for i, btn in enumerate(self.spot_swatches):
@@ -87,20 +105,88 @@ class Manga3DAppController(MainWindowUI):
 
     def _update_viewport_mode(self, index):
         """Switch viewport display between Color and Grayscale based on selected mode."""
-        # Cambiando modalità il mockup Spot si spegne sempre
+        # Cambiando modalità le anteprime toggle si spengono sempre
         if self.btn_spot_mockup.isChecked():
             self.btn_spot_mockup.setChecked(False)
             return  # il toggle handler richiama questo metodo col viewport giusto
+        if self.btn_cover_preview.isChecked():
+            self.btn_cover_preview.setChecked(False)
+            return
 
         if getattr(self, 'img_filtered_array', None) is None:
             return
 
-        if index == 1:   # Topographic Mode
+        if index == 1:        # Topographic Mode
             self.viewer.setImage(self._get_rgb_filtered())
-        elif index == 3: # Spot Color Mode: serve l'originale a colori per il picking
+        elif index in (3, 4): # Spot / Cover: serve l'originale a colori
             self.viewer.setImage(self.img_rgb_original)
-        else:            # Standard / Deckbox
+        else:                 # Standard / Deckbox
             self.viewer.setImage(self.img_filtered_array)
+
+    # ------------------------------------------------------------------
+    # PHONE COVER — composizione artwork sulla plate
+    # ------------------------------------------------------------------
+
+    def _on_mode_defaults(self, index):
+        """Entrando in modalità Cover imposta i default 'slim' per la sede
+        della plate (spessore max ~1mm, layer fini per le bande colore)."""
+        if index == 4:
+            self.spin_base.setValue(0.3)
+            self.spin_maxh.setValue(1.0)
+            self.spin_layer_height.setValue(0.10)
+
+    def _current_phone_preset(self):
+        name = self.combo_phone_model.currentText()
+        return self.phone_presets.get(name)
+
+    def _compose_cover(self, max_res_cap=1200):
+        """Applica sagoma + composizione correnti. Ritorna (art, mask, res)."""
+        preset = self._current_phone_preset()
+        if preset is None or getattr(self, 'img_rgb_original', None) is None:
+            return None
+        mask, res, _ = build_plate_raster(preset, max_res_cap=max_res_cap)
+        h_p, w_p = mask.shape
+        art = compose_cover_art(
+            self.img_rgb_original, w_p, h_p, res,
+            user_scale=self.slider_cover_scale.value() / 100.0,
+            offset_x_mm=float(self.slider_cover_offx.value()),
+            offset_y_mm=float(self.slider_cover_offy.value()))
+        return art, mask, res
+
+    def _on_cover_param_changed(self, _value):
+        self.lbl_cover_scale.setText(f"Zoom: {self.slider_cover_scale.value()}%")
+        self.lbl_cover_offx.setText(f"Offset X: {self.slider_cover_offx.value()} mm")
+        self.lbl_cover_offy.setText(f"Offset Y: {self.slider_cover_offy.value()} mm")
+        self._refresh_cover_preview()
+
+    def _on_cover_preview_toggled(self, checked):
+        if checked and getattr(self, 'img_rgb_original', None) is None:
+            self.btn_cover_preview.setChecked(False)
+            return
+        if checked:
+            self.btn_cover_preview.setText("👁 Back to Original")
+            self._refresh_cover_preview()
+        else:
+            self.btn_cover_preview.setText("👁 Plate Preview")
+            self._update_viewport_mode(self.mode_selector.currentIndex())
+
+    def _refresh_cover_preview(self):
+        """Anteprima: artwork composto con la sagoma della plate sovrapposta
+        (esterno oscurato, fori camera evidenti). Solo se il toggle è attivo."""
+        if not self.btn_cover_preview.isChecked():
+            return
+        composed = self._compose_cover(max_res_cap=800)  # leggera per la UI
+        if composed is None:
+            return
+        art, mask, res = composed
+        disp = art.copy()
+        disp[~mask] = disp[~mask] // 4  # oscura fuori sagoma e nei fori
+        self.cover_preview_array = np.ascontiguousarray(disp)
+        self.viewer.setImage(self.cover_preview_array)
+        preset = self._current_phone_preset()
+        self.lbl_status.setText(
+            f"👁 Plate {self.combo_phone_model.currentText()}: trascina con gli slider, "
+            f"i fori camera sono le zone scure.")
 
     # ------------------------------------------------------------------
     # SPOT COLOR — picking, auto-detect, mockup
@@ -349,9 +435,11 @@ class Manga3DAppController(MainWindowUI):
         # La versione RGB filtrata viene calcolata lazy da _get_rgb_filtered()
         self.img_rgb_filtered = None
 
-        # Display correct version based on mode (spegne anche un eventuale mockup attivo)
+        # Display correct version based on mode (spegne anche eventuali anteprime attive)
         self.btn_spot_mockup.setChecked(False)
         self.btn_spot_mockup.setEnabled(True)
+        self.btn_cover_preview.setChecked(False)
+        self.btn_cover_preview.setEnabled(True)
         self._update_viewport_mode(self.mode_selector.currentIndex())
 
         h, w = img.shape
@@ -500,6 +588,12 @@ class Manga3DAppController(MainWindowUI):
         if self.img_filtered_array is None or getattr(self, 'loaded_image_path', None) is None:
             return
 
+        if self.mode_selector.currentIndex() == 4:
+            QMessageBox.information(self, "Phone Cover",
+                                    "La generazione della plate arriva col prossimo aggiornamento:\n"
+                                    "per ora usa l'anteprima per comporre l'inquadratura.")
+            return
+
         export_3mf = self.chk_export_3mf.isChecked()
         export_stl = self.chk_export_stl.isChecked()
         
@@ -624,6 +718,7 @@ class Manga3DAppController(MainWindowUI):
             for btn in self.swatches:
                 btn.setEnabled(not self.chk_auto_midtones.isChecked())
             self.btn_spot_mockup.setEnabled(self.img_filtered_array is not None)
+            self.btn_cover_preview.setEnabled(self.img_filtered_array is not None)
             # In Deckbox i parametri fisici restano bloccati anche dopo l'unlock
             self._on_mode_changed(self.mode_selector.currentIndex())
 

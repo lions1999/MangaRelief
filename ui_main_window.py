@@ -130,7 +130,7 @@ class MainWindowUI(QMainWindow):
         
         self.mode_selector = QComboBox()
         self.mode_selector.setObjectName("mode_selector")
-        self.mode_selector.addItems(["Standard Manga Relief", "Topographic Color (Single Extruder)", "Deckbox Engraving", "Spot Color (Silkscreen)"])
+        self.mode_selector.addItems(["Standard Manga Relief", "Topographic Color (Single Extruder)", "Deckbox Engraving", "Spot Color (Silkscreen)", "Phone Cover Plate"])
         right_layout.addWidget(self.mode_selector)
         
         self.group_deckbox = QGroupBox("Deckbox Settings")
@@ -162,6 +162,44 @@ class MainWindowUI(QMainWindow):
         self.group_topo.setVisible(False)
         right_layout.addWidget(self.group_topo)
         
+        # PHONE COVER PANEL (Hidden by default)
+        self.group_cover = QGroupBox("Phone Cover Settings")
+        cover_layout = QFormLayout()
+
+        self.combo_phone_model = QComboBox()
+        cover_layout.addRow("Phone Model:", self.combo_phone_model)
+
+        self.combo_cover_finish = QComboBox()
+        self.combo_cover_finish.addItems(["B/N (Standard)", "Spot Color"])
+        cover_layout.addRow("Finish:", self.combo_cover_finish)
+
+        self.lbl_cover_scale = QLabel("Zoom: 100%")
+        self.slider_cover_scale = QSlider(Qt.Orientation.Horizontal)
+        self.slider_cover_scale.setRange(100, 300)
+        self.slider_cover_scale.setValue(100)
+        cover_layout.addRow(self.lbl_cover_scale, self.slider_cover_scale)
+
+        self.lbl_cover_offx = QLabel("Offset X: 0 mm")
+        self.slider_cover_offx = QSlider(Qt.Orientation.Horizontal)
+        self.slider_cover_offx.setRange(-60, 60)
+        self.slider_cover_offx.setValue(0)
+        cover_layout.addRow(self.lbl_cover_offx, self.slider_cover_offx)
+
+        self.lbl_cover_offy = QLabel("Offset Y: 0 mm")
+        self.slider_cover_offy = QSlider(Qt.Orientation.Horizontal)
+        self.slider_cover_offy.setRange(-80, 80)
+        self.slider_cover_offy.setValue(0)
+        cover_layout.addRow(self.lbl_cover_offy, self.slider_cover_offy)
+
+        self.btn_cover_preview = QPushButton("👁 Plate Preview")
+        self.btn_cover_preview.setCheckable(True)
+        self.btn_cover_preview.setEnabled(False)
+        cover_layout.addRow(self.btn_cover_preview)
+
+        self.group_cover.setLayout(cover_layout)
+        self.group_cover.setVisible(False)
+        right_layout.addWidget(self.group_cover)
+
         # SPOT COLOR PANEL (Hidden by default)
         self.group_spot = QGroupBox("Spot Color Settings")
         spot_layout = QVBoxLayout()
@@ -245,7 +283,7 @@ class MainWindowUI(QMainWindow):
         form_layout.addRow("Max Dim (mm):", self.spin_dim)
 
         self.spin_base = QDoubleSpinBox()
-        self.spin_base.setRange(0.5, 10.0)
+        self.spin_base.setRange(0.2, 10.0)  # min 0.2: le plate cover sono slim
         self.spin_base.setValue(1.0)
         self.spin_base.setSingleStep(0.1)
         form_layout.addRow("Base (mm):", self.spin_base)
@@ -364,12 +402,17 @@ class MainWindowUI(QMainWindow):
         
         # Connect mode selector to visibility toggle
         self.mode_selector.currentIndexChanged.connect(self._on_mode_changed)
+        self.combo_cover_finish.currentIndexChanged.connect(
+            lambda _: self._on_mode_changed(self.mode_selector.currentIndex()))
 
         # Registro dei widget da bloccare durante la generazione: ogni nuovo
         # controllo va aggiunto QUI, non dentro toggle_ui_state
         self.lockable_widgets = [
             self.btn_load, self.mode_selector, self.combo_tcg_select,
             self.btn_extract_topo, self.topo_color_list,
+            self.combo_phone_model, self.combo_cover_finish,
+            self.slider_cover_scale, self.slider_cover_offx,
+            self.slider_cover_offy, self.btn_cover_preview,
             self.combo_spot_naccents, self.btn_spot_auto, *self.spot_swatches,
             self.slider_spot_coverage, self.btn_spot_mockup,
             self.chk_auto_midtones, *self.swatches,
@@ -393,14 +436,18 @@ class MainWindowUI(QMainWindow):
         is_topo    = (index == 1)
         is_deckbox = (index == 2)
         is_spot    = (index == 3)
+        is_cover   = (index == 4)
+        cover_spot = is_cover and self.combo_cover_finish.currentIndex() == 1
 
         self.group_topo.setVisible(is_topo)
         self.group_deckbox.setVisible(is_deckbox)
-        self.group_spot.setVisible(is_spot)
+        self.group_cover.setVisible(is_cover)
+        # il gruppo Spot serve anche alla finitura Spot della cover
+        self.group_spot.setVisible(is_spot or cover_spot)
 
-        # Hide standard relief controls when topo/spot are active
-        self.group_swatch.setVisible(not (is_topo or is_spot))
-        self.group_z.setVisible(not (is_topo or is_spot))
+        # Hide standard relief controls when topo/spot/cover are active
+        self.group_swatch.setVisible(not (is_topo or is_spot or is_cover))
+        self.group_z.setVisible(not (is_topo or is_spot or is_cover))
 
         # Dynamically lock physical parameters for Deckbox mode
         if is_deckbox:

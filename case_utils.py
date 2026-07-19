@@ -187,3 +187,66 @@ def carve_plate_recess(case_mesh: trimesh.Trimesh,
     plate_outline = opening.buffer(groove_w - plate_clearance, quad_segs=8)
     plate_thickness = round((y_out - lip_t) - y_in - 0.1, 2)
     return carved, plate_outline, plate_thickness
+
+
+# ---------------------------------------------------------------------------
+# COMPOSIZIONE ARTWORK SU PLATE (modalità Phone Cover)
+# ---------------------------------------------------------------------------
+
+def build_plate_raster(preset: dict, max_res_cap: int = 1200):
+    """Costruisce la maschera raster della back plate dal preset telefono:
+    sagoma arrotondata (dimensioni da compute_plate_dims) meno i fori camera.
+    Ritorna (mask HxW, res_mm_per_px, plate_dims)."""
+    from mesh_utils import rounded_rect_mask
+
+    pd = compute_plate_dims(preset['width'], preset['height'], preset['corner_radius'])
+    W, H = pd['width'], pd['height']
+    res = max(W, H) / float(max_res_cap)
+    w_px, h_px = int(round(W / res)), int(round(H / res))
+    # i fori camera del preset sono riferiti al corpo telefono: la plate
+    # sborda di 'extra' mm su ogni lato, quindi vanno traslati
+    extra = (W - preset['width']) / 2.0
+    holes = [(int((extra + h_['x']) / res), int((extra + h_['y']) / res),
+              int(h_['w'] / res), int(h_['h'] / res), h_['r'] / res)
+             for h_ in preset.get('camera_holes', [])]
+    mask = rounded_rect_mask(h_px, w_px, pd['corner_radius'] / res, holes=holes)
+    return mask, res, pd
+
+
+def compose_cover_art(image_rgb: np.ndarray, plate_w_px: int, plate_h_px: int,
+                      res: float, user_scale: float = 1.0,
+                      offset_x_mm: float = 0.0, offset_y_mm: float = 0.0,
+                      fill_rgb=(245, 245, 245)) -> np.ndarray:
+    """Campiona l'immagine sul raster della plate ('cover fill' + zoom/offset).
+
+    - user_scale = 1.0: l'immagine copre esattamente la plate (riempimento);
+      valori maggiori zoomano dentro.
+    - offset_x/y_mm: spostano l'IMMAGINE rispetto alla plate (x>0 destra,
+      y>0 giù, nella vista dal retro). Le zone scoperte diventano fill_rgb.
+    """
+    import cv2
+
+    h_img, w_img = image_rgb.shape[:2]
+    s_fill = max(plate_w_px / w_img, plate_h_px / h_img)
+    s = s_fill * max(0.05, user_scale)
+
+    src_w, src_h = plate_w_px / s, plate_h_px / s
+    src_cx = w_img / 2.0 - (offset_x_mm / res) / s
+    src_cy = h_img / 2.0 - (offset_y_mm / res) / s
+    x0, y0 = src_cx - src_w / 2.0, src_cy - src_h / 2.0
+    x1, y1 = x0 + src_w, y0 + src_h
+
+    # padding con colore di riempimento dove il ritaglio esce dall'immagine
+    pad_l = int(np.ceil(max(0, -x0)))
+    pad_t = int(np.ceil(max(0, -y0)))
+    pad_r = int(np.ceil(max(0, x1 - w_img)))
+    pad_b = int(np.ceil(max(0, y1 - h_img)))
+    if pad_l or pad_t or pad_r or pad_b:
+        image_rgb = cv2.copyMakeBorder(image_rgb, pad_t, pad_b, pad_l, pad_r,
+                                       cv2.BORDER_CONSTANT, value=fill_rgb)
+        x0 += pad_l; x1 += pad_l
+        y0 += pad_t; y1 += pad_t
+
+    crop = image_rgb[int(round(y0)):int(round(y1)), int(round(x0)):int(round(x1))]
+    interp = cv2.INTER_AREA if s < 1.0 else cv2.INTER_LANCZOS4
+    return cv2.resize(crop, (plate_w_px, plate_h_px), interpolation=interp)
