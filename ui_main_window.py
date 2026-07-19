@@ -191,6 +191,11 @@ class MainWindowUI(QMainWindow):
         self.slider_cover_offy.setValue(0)
         cover_layout.addRow(self.lbl_cover_offy, self.slider_cover_offy)
 
+        self.chk_cover_bumper = QCheckBox("Generate TPU bumper too (separate STL)")
+        self.chk_cover_bumper.setChecked(True)
+        self.chk_cover_bumper.setToolTip("Deseleziona se hai già stampato il bumper: verrà generata solo la plate.")
+        cover_layout.addRow(self.chk_cover_bumper)
+
         self.btn_cover_preview = QPushButton("👁 Plate Preview")
         self.btn_cover_preview.setCheckable(True)
         self.btn_cover_preview.setEnabled(False)
@@ -412,7 +417,7 @@ class MainWindowUI(QMainWindow):
             self.btn_extract_topo, self.topo_color_list,
             self.combo_phone_model, self.combo_cover_finish,
             self.slider_cover_scale, self.slider_cover_offx,
-            self.slider_cover_offy, self.btn_cover_preview,
+            self.slider_cover_offy, self.btn_cover_preview, self.chk_cover_bumper,
             self.combo_spot_naccents, self.btn_spot_auto, *self.spot_swatches,
             self.slider_spot_coverage, self.btn_spot_mockup,
             self.chk_auto_midtones, *self.swatches,

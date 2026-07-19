@@ -11,6 +11,7 @@ from config import DeckboxConfig
 from mesh_utils import (create_solid_mesh, process_mesh_topo, export_3mf,
                         compute_topo_z_heights, compute_topo_switch_z)
 from color_utils import classify_spot_pixels, downsample_for_analysis
+from case_utils import build_plate_raster, compose_cover_art, build_bumper
 from utils import resource_path
 
 class MeshWorker(QThread):
@@ -32,7 +33,10 @@ class MeshWorker(QThread):
                  max_res_cap=1200, smart_decimate=True, white_clip=235, black_clip=15,
                  color_mode=4, is_deckbox_mode=False, tcg_name='Yu-Gi-Oh!',
                  is_topo_mode=False, topo_colors=None, source_image_name='panel',
-                 is_spot_mode=False, spot_accents=None, spot_coverage=40):
+                 is_spot_mode=False, spot_accents=None, spot_coverage=40,
+                 is_cover_mode=False, cover_preset=None, cover_scale=1.0,
+                 cover_off_x=0.0, cover_off_y=0.0, cover_finish_spot=False,
+                 include_bumper=False):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -56,6 +60,13 @@ class MeshWorker(QThread):
         self.is_spot_mode = is_spot_mode
         self.spot_accents = spot_accents or []
         self.spot_coverage = spot_coverage
+        self.is_cover_mode = is_cover_mode
+        self.cover_preset = cover_preset
+        self.cover_scale = cover_scale
+        self.cover_off_x = cover_off_x
+        self.cover_off_y = cover_off_y
+        self.cover_finish_spot = cover_finish_spot
+        self.include_bumper = include_bumper
         self.cancel_requested = False
 
     def _check_cancel(self):
@@ -247,6 +258,29 @@ class MeshWorker(QThread):
             export_changes_z = self.color_changes_z
             export_slot_colors = None
 
+            plate_mask = None
+            if self.is_cover_mode and self.cover_preset:
+                self.progress.emit(6, "📱 Composing artwork on plate...")
+                if isinstance(self.img_filtered, np.ndarray) and len(self.img_filtered.shape) == 2:
+                    img_rgb_src = cv2.cvtColor(self.img_filtered, cv2.COLOR_GRAY2RGB)
+                else:
+                    img_rgb_src = self.img_filtered
+                plate_mask, res, pd = build_plate_raster(self.cover_preset, self.max_res_cap)
+                h_p, w_p = plate_mask.shape
+                art = compose_cover_art(img_rgb_src, w_p, h_p, res,
+                                        user_scale=self.cover_scale,
+                                        offset_x_mm=self.cover_off_x,
+                                        offset_y_mm=self.cover_off_y)
+                accents = self.spot_accents if self.cover_finish_spot else []
+                palette, idx_map = classify_spot_pixels(art, accents,
+                                                        coverage=self.spot_coverage)
+                self.img_filtered = np.array(palette, dtype=np.uint8)[idx_map]
+                export_slot_colors = ['#%02x%02x%02x' % tuple(c) for c in palette[1:]]
+                # la plate segue la pipeline Topographic (terrazze + snap)
+                self.is_topo_mode = True
+                self.topo_colors = palette
+                self.max_dim = max(pd['width'], pd['height'])
+
             if self.is_spot_mode:
                 self.progress.emit(8, "🎯 Spot Color classification...")
                 if isinstance(self.img_filtered, np.ndarray) and len(self.img_filtered.shape) == 2:
@@ -283,7 +317,8 @@ class MeshWorker(QThread):
                     total_z=self.max_h,
                     max_dim=self.max_dim,
                     layer_height=self.layer_height,
-                    max_res_cap=self.max_res_cap
+                    max_res_cap=self.max_res_cap,
+                    mask=plate_mask
                 )
                 self._check_cancel()
                 self.progress.emit(80, "Optimizing Topo Mesh...")
@@ -412,6 +447,18 @@ class MeshWorker(QThread):
                 if self.output_path_3mf:
                     export_3mf(mesh, self.output_path_3mf, export_changes_z,
                                slot_colors=export_slot_colors)
+
+                if self.is_cover_mode and self.include_bumper and self.cover_preset:
+                    self.progress.emit(99, "Generating TPU bumper (separate STL)...")
+                    p = self.cover_preset
+                    bumper = build_bumper(
+                        p['width'], p['height'], p['thickness'], p['corner_radius'],
+                        bottom_opening_w=p.get('bottom_opening', 45.0),
+                        side_cutouts=[tuple(c) for c in p.get('side_cutouts', [])],
+                        top_cutouts=[tuple(c) for c in p.get('top_cutouts', [])])
+                    ref = self.output_path or self.output_path_3mf
+                    bumper_path = os.path.splitext(ref)[0] + "_bumper_TPU.stl"
+                    bumper.export(bumper_path)
                 
                 self.progress.emit(100, "Export completed!")
                 self.finished_ok.emit(self.output_path or "", self.output_path_3mf or "")

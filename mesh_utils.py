@@ -184,12 +184,16 @@ def compute_topo_switch_z(z_heights: list, layer_height: float) -> list:
 def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
                       base_z: float = 1.0, total_z: float = 2.4,
                       max_dim: float = 100.0, layer_height: float = 0.2,
-                      max_res_cap: int = 800):
-    """Genera una mesh a terrazze basata sui colori forniti, quantizzata sui layer di stampa."""
+                      max_res_cap: int = 800, mask=None):
+    """Genera una mesh a terrazze basata sui colori forniti, quantizzata sui layer di stampa.
+    mask (opzionale): sagoma booleana della stessa shape dell'immagine (es. plate
+    cover con fori camera); implica che l'immagine sia già alla risoluzione finale."""
     # Pre-scaling al cap del selettore Mesh Quality (Draft 800 / Standard 1200 / Ultra 1600)
     h, w = image_rgb.shape[:2]
     max_size = int(max_res_cap)
-    if max(h, w) > max_size:
+    if mask is not None:
+        assert mask.shape == (h, w), "mask e immagine devono avere la stessa shape"
+    elif max(h, w) > max_size:
         scale = max_size / max(h, w)
         new_w, new_h = int(w * scale), int(h * scale)
         img_pil = Image.fromarray(image_rgb).resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -253,8 +257,8 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
     # Costruisci heightmap discreta usando le altezze quantizzate
     Z = np.zeros((h, w), dtype=np.float32)
     for i in range(n_colors):
-        mask = (indices == i)
-        Z[mask] = exact_z_heights[i]
+        color_mask = (indices == i)   # NB: non chiamarla 'mask', ombreggerebbe il parametro sagoma
+        Z[color_mask] = exact_z_heights[i]
 
     # Calcolo dimensioni meshgrid
     if w >= h:
@@ -269,7 +273,7 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
     X, Y = np.meshgrid(x, y)
 
     # Generazione Mesh tramite la utility interna
-    mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0)
+    mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0, mask=mask)
     return mesh
 
 

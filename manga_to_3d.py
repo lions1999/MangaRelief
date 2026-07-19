@@ -588,10 +588,9 @@ class Manga3DAppController(MainWindowUI):
         if self.img_filtered_array is None or getattr(self, 'loaded_image_path', None) is None:
             return
 
-        if self.mode_selector.currentIndex() == 4:
-            QMessageBox.information(self, "Phone Cover",
-                                    "La generazione della plate arriva col prossimo aggiornamento:\n"
-                                    "per ora usa l'anteprima per comporre l'inquadratura.")
+        is_cover = (self.mode_selector.currentIndex() == 4)
+        if is_cover and self._current_phone_preset() is None:
+            QMessageBox.warning(self, "Phone Cover", "Seleziona un modello di telefono.")
             return
 
         export_3mf = self.chk_export_3mf.isChecked()
@@ -668,9 +667,9 @@ class Manga3DAppController(MainWindowUI):
 
         self.generation_start_time = time.time()
         
-        # In Topo/Spot mode, pass the RGB image instead of the filtered grayscale one
+        # In Topo/Spot/Cover mode, pass the RGB image instead of the filtered grayscale one
         is_spot = (self.mode_selector.currentIndex() == 3)
-        input_img = self.img_rgb_original if (is_topo or is_spot) else self.img_filtered_array
+        input_img = self.img_rgb_original if (is_topo or is_spot or is_cover) else self.img_filtered_array
 
         self.worker = MeshWorker(
             img_filtered=input_img,
@@ -694,7 +693,14 @@ class Manga3DAppController(MainWindowUI):
             source_image_name=base_name,
             is_spot_mode=is_spot,
             spot_accents=self._get_spot_accents(),
-            spot_coverage=self.slider_spot_coverage.value()
+            spot_coverage=self.slider_spot_coverage.value(),
+            is_cover_mode=is_cover,
+            cover_preset=self._current_phone_preset(),
+            cover_scale=self.slider_cover_scale.value() / 100.0,
+            cover_off_x=float(self.slider_cover_offx.value()),
+            cover_off_y=float(self.slider_cover_offy.value()),
+            cover_finish_spot=(self.combo_cover_finish.currentIndex() == 1),
+            include_bumper=self.chk_cover_bumper.isChecked()
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
@@ -763,8 +769,13 @@ class Manga3DAppController(MainWindowUI):
         Build a human-readable string describing the colour-change Z heights
         for the export success dialog. Handles Topo, Standard (4/3/2-colour) modes.
         """
-        if self.mode_selector.currentIndex() == 3:  # Spot Color
-            palette  = build_spot_palette(self._get_spot_accents())
+        mode_idx = self.mode_selector.currentIndex()
+        if mode_idx in (3, 4):  # Spot Color / Phone Cover
+            if mode_idx == 4 and self.combo_cover_finish.currentIndex() == 0:
+                accents = []   # finitura B/N: solo bianco+nero
+            else:
+                accents = self._get_spot_accents()
+            palette  = build_spot_palette(accents)
             layer_h  = self.spin_layer_height.value()
             z_heights = compute_topo_z_heights(self.spin_base.value(),
                                                self.spin_maxh.value(),
@@ -841,6 +852,10 @@ class Manga3DAppController(MainWindowUI):
                 msg += f"📄 STL → {stl_path}\n"
             if path_3mf:
                 msg += f"🎨 3MF → {path_3mf}\n"
+            if (self.mode_selector.currentIndex() == 4 and self.chk_cover_bumper.isChecked()
+                    and (stl_path or path_3mf)):
+                bumper_path = os.path.splitext(stl_path or path_3mf)[0] + "_bumper_TPU.stl"
+                msg += f"🧷 Bumper (stampa in TPU) → {bumper_path}\n"
             
         msg += f"\n⏱️ Time elapsed: {time_str}\n\n"
         
