@@ -175,8 +175,11 @@ class MainWindowUI(QMainWindow):
 
         self.lbl_cover_scale = QLabel("Zoom: 100%")
         self.slider_cover_scale = QSlider(Qt.Orientation.Horizontal)
-        self.slider_cover_scale.setRange(100, 300)
+        # 100% = riempimento esatto della plate; sotto il 100% l'immagine
+        # rimpicciolisce (bordi bianchi base) per posizionarla più facilmente
+        self.slider_cover_scale.setRange(50, 300)
         self.slider_cover_scale.setValue(100)
+        self.slider_cover_scale.setToolTip("100% = fill esatto. <100% rimpicciolisce l'immagine (bordi bianchi), >100% zooma dentro.")
         cover_layout.addRow(self.lbl_cover_scale, self.slider_cover_scale)
 
         self.lbl_cover_offx = QLabel("Offset X: 0 mm")
