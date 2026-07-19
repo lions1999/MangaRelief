@@ -11,14 +11,20 @@ from scipy.ndimage import (median_filter, label, binary_erosion,
 from config import SLOT_COLORS_3MF
 from color_utils import rgb_to_lab, CHROMA_MATCH_WEIGHT
 
-def create_solid_mesh(X, Y, Z, bottom_z=0.0):
+def create_solid_mesh(X, Y, Z, bottom_z=0.0, mask=None):
     """
     Generates a solid watertight mesh from X, Y, Z meshgrids.
     Seals the bottom and the four sides.
+    mask (opzionale): array booleano HxW, True = incluso. Genera superficie solo
+    per le celle interamente incluse e sigilla con pareti verticali tutti i
+    bordi, esterni e fori interni (es. sagoma cover + foro fotocamera).
     """
+    if mask is not None:
+        return _create_masked_solid_mesh(X, Y, Z, bottom_z, mask)
+
     h, w = Z.shape
     offset = w * h
-    
+
     # Top vertices and faces
     vertices_top = np.column_stack((X.ravel(), Y.ravel(), Z.ravel()))
     idx = np.arange(w * h).reshape((h, w))
@@ -45,18 +51,97 @@ def create_solid_mesh(X, Y, Z, bottom_z=0.0):
     v1, v2 = idx[-1, :-1], idx[-1, 1:]
     bot_sides = np.vstack((np.column_stack((v2, v1, v1 + offset)), np.column_stack((v2 + offset, v2, v1 + offset))))
     
-    # Left edge
+    # Left edge (normale esterna -X: winding corretto, prima era invertito)
     v1, v2 = idx[:-1, 0], idx[1:, 0]
-    left_sides = np.vstack((np.column_stack((v1, v2, v1 + offset)), np.column_stack((v2, v2 + offset, v1 + offset))))
-    
-    # Right edge
+    left_sides = np.vstack((np.column_stack((v2, v1, v1 + offset)), np.column_stack((v2 + offset, v2, v1 + offset))))
+
+    # Right edge (normale esterna +X: winding corretto, prima era invertito)
     v1, v2 = idx[:-1, -1], idx[1:, -1]
-    right_sides = np.vstack((np.column_stack((v2, v1, v1 + offset)), np.column_stack((v2 + offset, v2, v1 + offset))))
+    right_sides = np.vstack((np.column_stack((v1, v2, v1 + offset)), np.column_stack((v2, v2 + offset, v1 + offset))))
     
     all_vertices = np.vstack((vertices_top, vertices_bottom))
     all_faces = np.vstack((faces_top, faces_bottom, top_sides, bot_sides, left_sides, right_sides))
     
     return trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
+
+
+def _create_masked_solid_mesh(X, Y, Z, bottom_z, mask):
+    """Variante di create_solid_mesh limitata a una sagoma arbitraria.
+    Una cella entra nella mesh solo se tutti e 4 i suoi vertici sono nel mask;
+    ogni lato di cella confinante con l'esterno (o con un foro) genera una
+    parete verticale con lo stesso winding delle 4 pareti del caso pieno."""
+    h, w = Z.shape
+    offset = w * h
+    idx = np.arange(w * h).reshape((h, w))
+
+    vertices_top = np.column_stack((X.ravel(), Y.ravel(), Z.ravel()))
+    vertices_bottom = np.column_stack((X.ravel(), Y.ravel(),
+                                       np.full(w * h, bottom_z, dtype=Z.dtype)))
+
+    inc = mask[:-1, :-1] & mask[:-1, 1:] & mask[1:, :-1] & mask[1:, 1:]
+
+    tl = idx[:-1, :-1][inc]
+    tr = idx[:-1, 1:][inc]
+    bl = idx[1:, :-1][inc]
+    br = idx[1:, 1:][inc]
+    faces_top = np.vstack((np.column_stack((bl, tr, tl)), np.column_stack((br, tr, bl))))
+    faces_bottom = np.vstack((np.column_stack((tl + offset, tr + offset, bl + offset)),
+                              np.column_stack((bl + offset, tr + offset, br + offset))))
+
+    false_row = np.zeros((1, inc.shape[1]), dtype=bool)
+    false_col = np.zeros((inc.shape[0], 1), dtype=bool)
+    walls = []
+
+    # Nord: cella inclusa senza vicina sopra
+    r, c = np.nonzero(inc & ~np.vstack((false_row, inc[:-1])))
+    v1, v2 = idx[r, c], idx[r, c + 1]
+    walls += [np.column_stack((v1, v2, v1 + offset)),
+              np.column_stack((v2, v2 + offset, v1 + offset))]
+    # Sud: cella inclusa senza vicina sotto
+    r, c = np.nonzero(inc & ~np.vstack((inc[1:], false_row)))
+    v1, v2 = idx[r + 1, c], idx[r + 1, c + 1]
+    walls += [np.column_stack((v2, v1, v1 + offset)),
+              np.column_stack((v2 + offset, v2, v1 + offset))]
+    # Ovest: cella inclusa senza vicina a sinistra (normale esterna -X)
+    r, c = np.nonzero(inc & ~np.hstack((false_col, inc[:, :-1])))
+    v1, v2 = idx[r, c], idx[r + 1, c]
+    walls += [np.column_stack((v2, v1, v1 + offset)),
+              np.column_stack((v2 + offset, v2, v1 + offset))]
+    # Est: cella inclusa senza vicina a destra (normale esterna +X)
+    r, c = np.nonzero(inc & ~np.hstack((inc[:, 1:], false_col)))
+    v1, v2 = idx[r, c + 1], idx[r + 1, c + 1]
+    walls += [np.column_stack((v1, v2, v1 + offset)),
+              np.column_stack((v2, v2 + offset, v1 + offset))]
+
+    all_vertices = np.vstack((vertices_top, vertices_bottom))
+    all_faces = np.vstack([faces_top, faces_bottom] + walls)
+    mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=False)
+    mesh.remove_unreferenced_vertices()
+    return mesh
+
+
+def rounded_rect_mask(h: int, w: int, radius_px: float,
+                      hole=None, hole_radius_px: float = 0.0) -> np.ndarray:
+    """Maschera booleana HxW a rettangolo con angoli arrotondati, meno un
+    eventuale foro (anch'esso rounded-rect). hole = (x0, y0, w_px, h_px) in
+    coordinate pixel. È la sagoma base della back plate per cover telefono."""
+    yy, xx = np.mgrid[0:h, 0:w]
+
+    def _rrect(x0, y0, x1, y1, r):
+        r = max(0.0, min(r, (x1 - x0) / 2.0, (y1 - y0) / 2.0))
+        inside_x = (xx >= x0 + r) & (xx <= x1 - r) & (yy >= y0) & (yy <= y1)
+        inside_y = (xx >= x0) & (xx <= x1) & (yy >= y0 + r) & (yy <= y1 - r)
+        m = inside_x | inside_y
+        for cx, cy in ((x0 + r, y0 + r), (x1 - r, y0 + r),
+                       (x0 + r, y1 - r), (x1 - r, y1 - r)):
+            m |= (xx - cx) ** 2 + (yy - cy) ** 2 <= r * r
+        return m
+
+    m = _rrect(0, 0, w - 1, h - 1, radius_px)
+    if hole is not None:
+        hx, hy, hw_, hh_ = hole
+        m &= ~_rrect(hx, hy, hx + hw_, hy + hh_, hole_radius_px)
+    return m
 
 
 def compute_topo_z_heights(base_z: float, total_z: float, layer_height: float, n_colors: int) -> list:
