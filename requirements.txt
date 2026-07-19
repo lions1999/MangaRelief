@@ -6,3 +6,9 @@ matplotlib
 pillow
 pillow-heif
 PyQt6
+scipy
+scikit-learn
+fast-simplification
+shapely
+manifold3d
+mapbox-earcut

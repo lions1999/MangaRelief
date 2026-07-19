@@ -1,0 +1,21 @@
+{
+  "_note": "Misure corpo da specifiche ufficiali; finestra fotocamera e ritagli laterali sono INDICATIVI: verificarli col righello sul telefono prima di stampare. camera: posizione dall'angolo alto-sinistro del retro, in mm.",
+  "OnePlus Nord 3 5G": {
+    "width": 75.1,
+    "height": 162.6,
+    "thickness": 8.2,
+    "corner_radius": 9.0,
+    "camera": {"x_from_left": 6.0, "y_from_top": 6.0, "width": 34.0, "height": 40.0, "radius": 9.0},
+    "side_cutouts": [["right", 30.0, 45.0], ["left", 30.0, 25.0]],
+    "bottom_opening": 45.0
+  },
+  "iPhone 17": {
+    "width": 71.5,
+    "height": 149.6,
+    "thickness": 7.95,
+    "corner_radius": 11.0,
+    "camera": {"x_from_left": 4.0, "y_from_top": 4.0, "width": 34.0, "height": 34.0, "radius": 11.0},
+    "side_cutouts": [["right", 25.0, 35.0], ["left", 20.0, 40.0]],
+    "bottom_opening": 45.0
+  }
+}
