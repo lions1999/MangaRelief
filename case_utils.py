@@ -250,3 +250,27 @@ def compose_cover_art(image_rgb: np.ndarray, plate_w_px: int, plate_h_px: int,
     crop = image_rgb[int(round(y0)):int(round(y1)), int(round(x0)):int(round(x1))]
     interp = cv2.INTER_AREA if s < 1.0 else cv2.INTER_LANCZOS4
     return cv2.resize(crop, (plate_w_px, plate_h_px), interpolation=interp)
+
+
+def compose_plate_art(image_rgb, preset: dict, mask, res: float,
+                      user_scale: float = 1.0, off_x: float = 0.0, off_y: float = 0.0,
+                      avoid_camera: bool = True, camera_margin_mm: float = 3.0,
+                      fill_rgb=(245, 245, 245)):
+    """Compone l'artwork sul raster della plate. Con avoid_camera=True l'immagine
+    viene adattata SOLO alla zona sotto il blocco fotocamere (+margine): la
+    fascia superiore resta del colore base, con i soli fori camera."""
+    h_p, w_p = mask.shape
+    y_start = 0
+    holes = preset.get('camera_holes', [])
+    if avoid_camera and holes:
+        pd = compute_plate_dims(preset['width'], preset['height'], preset['corner_radius'])
+        extra = (pd['width'] - preset['width']) / 2.0
+        zone_bottom = max(h_['y'] + h_['h'] for h_ in holes) + camera_margin_mm
+        y_start = min(int(round((extra + zone_bottom) / res)), h_p - 10)
+
+    art = np.full((h_p, w_p, 3), fill_rgb, dtype=np.uint8)
+    art[y_start:] = compose_cover_art(image_rgb, w_p, h_p - y_start, res,
+                                      user_scale=user_scale,
+                                      offset_x_mm=off_x, offset_y_mm=off_y,
+                                      fill_rgb=fill_rgb)
+    return art

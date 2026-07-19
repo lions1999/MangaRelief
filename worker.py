@@ -11,7 +11,7 @@ from config import DeckboxConfig
 from mesh_utils import (create_solid_mesh, process_mesh_topo, export_3mf,
                         compute_topo_z_heights, compute_topo_switch_z)
 from color_utils import classify_spot_pixels, downsample_for_analysis
-from case_utils import build_plate_raster, compose_cover_art, build_bumper
+from case_utils import build_plate_raster, compose_plate_art, build_bumper
 from utils import resource_path
 
 class MeshWorker(QThread):
@@ -36,7 +36,7 @@ class MeshWorker(QThread):
                  is_spot_mode=False, spot_accents=None, spot_coverage=40,
                  is_cover_mode=False, cover_preset=None, cover_scale=1.0,
                  cover_off_x=0.0, cover_off_y=0.0, cover_finish_spot=False,
-                 include_bumper=False):
+                 include_bumper=False, cover_avoid_camera=True):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -67,6 +67,7 @@ class MeshWorker(QThread):
         self.cover_off_y = cover_off_y
         self.cover_finish_spot = cover_finish_spot
         self.include_bumper = include_bumper
+        self.cover_avoid_camera = cover_avoid_camera
         self.cancel_requested = False
 
     def _check_cancel(self):
@@ -266,11 +267,10 @@ class MeshWorker(QThread):
                 else:
                     img_rgb_src = self.img_filtered
                 plate_mask, res, pd = build_plate_raster(self.cover_preset, self.max_res_cap)
-                h_p, w_p = plate_mask.shape
-                art = compose_cover_art(img_rgb_src, w_p, h_p, res,
+                art = compose_plate_art(img_rgb_src, self.cover_preset, plate_mask, res,
                                         user_scale=self.cover_scale,
-                                        offset_x_mm=self.cover_off_x,
-                                        offset_y_mm=self.cover_off_y)
+                                        off_x=self.cover_off_x, off_y=self.cover_off_y,
+                                        avoid_camera=self.cover_avoid_camera)
                 accents = self.spot_accents if self.cover_finish_spot else []
                 palette, idx_map = classify_spot_pixels(art, accents,
                                                         coverage=self.spot_coverage)

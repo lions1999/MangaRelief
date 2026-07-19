@@ -18,7 +18,7 @@ from color_utils import (extract_dominant_colors, suggest_midtones,
                          suggest_spot_accents, classify_spot_pixels,
                          downsample_for_analysis, build_spot_palette)
 from mesh_utils import compute_topo_z_heights, compute_topo_switch_z
-from case_utils import load_phone_presets, build_plate_raster, compose_cover_art
+from case_utils import load_phone_presets, build_plate_raster, compose_plate_art
 from worker import MeshWorker
 
 # Abilitiamo i plugin HEIF e AVIF in caso di fallimento OpenCV
@@ -93,6 +93,7 @@ class Manga3DAppController(MainWindowUI):
         self.slider_cover_offx.valueChanged.connect(self._on_cover_param_changed)
         self.slider_cover_offy.valueChanged.connect(self._on_cover_param_changed)
         self.combo_phone_model.currentIndexChanged.connect(lambda _: self._refresh_cover_preview())
+        self.chk_cover_avoid_camera.toggled.connect(lambda _: self._refresh_cover_preview())
         self.mode_selector.currentIndexChanged.connect(self._on_mode_defaults)
 
         # Spot Color
@@ -145,12 +146,12 @@ class Manga3DAppController(MainWindowUI):
         if preset is None or getattr(self, 'img_rgb_original', None) is None:
             return None
         mask, res, _ = build_plate_raster(preset, max_res_cap=max_res_cap)
-        h_p, w_p = mask.shape
-        art = compose_cover_art(
-            self.img_rgb_original, w_p, h_p, res,
+        art = compose_plate_art(
+            self.img_rgb_original, preset, mask, res,
             user_scale=self.slider_cover_scale.value() / 100.0,
-            offset_x_mm=float(self.slider_cover_offx.value()),
-            offset_y_mm=float(self.slider_cover_offy.value()))
+            off_x=float(self.slider_cover_offx.value()),
+            off_y=float(self.slider_cover_offy.value()),
+            avoid_camera=self.chk_cover_avoid_camera.isChecked())
         return art, mask, res
 
     def _on_cover_param_changed(self, _value):
@@ -700,7 +701,8 @@ class Manga3DAppController(MainWindowUI):
             cover_off_x=float(self.slider_cover_offx.value()),
             cover_off_y=float(self.slider_cover_offy.value()),
             cover_finish_spot=(self.combo_cover_finish.currentIndex() == 1),
-            include_bumper=self.chk_cover_bumper.isChecked()
+            include_bumper=self.chk_cover_bumper.isChecked(),
+            cover_avoid_camera=self.chk_cover_avoid_camera.isChecked()
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
