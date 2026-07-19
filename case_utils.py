@@ -134,3 +134,56 @@ def load_phone_presets() -> dict:
     path = resource_path(os.path.join("assets", "phone_presets.json"))
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+# ---------------------------------------------------------------------------
+# RETROFIT: scavo sede plate in una cover esistente (STL di terze parti)
+# ---------------------------------------------------------------------------
+
+def _extrude_xz(poly, y_from: float, y_to: float) -> trimesh.Trimesh:
+    """Estrude un poligono shapely (coordinate = piano X-Z del case) lungo Y."""
+    m = trimesh.creation.extrude_polygon(poly, y_to - y_from)
+    m.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+    m.apply_translation([0, y_to, 0])
+    return m
+
+
+def carve_plate_recess(case_mesh: trimesh.Trimesh,
+                       cavity_xz: tuple, corner_r: float,
+                       wall_y: tuple,
+                       keep_zones=(),
+                       frame_w: float = 3.0, lip_t: float = 0.8,
+                       groove_w: float = 1.2, plate_clearance: float = 0.3):
+    """Scava in una cover esistente la sede per la back plate artistica.
+
+    - finestra passante nella parete posteriore, arretrata di frame_w dal
+      bordo cavità (resta una cornice estetica)
+    - tasca sottosquadro dall'interno, più larga di groove_w: la plate si
+      infila dal lato telefono e resta trattenuta dal labbro esterno (lip_t)
+    - keep_zones: poligoni shapely (piano X-Z) da NON scavare, es. il blocco
+      fotocamera originale con i suoi dettagli
+
+    cavity_xz = (x0, z0, x1, z1) della cavità telefono; wall_y = (y_interno,
+    y_esterno) della parete posteriore.
+    Ritorna (case_scavato, sagoma_plate_shapely, spessore_plate_max).
+    """
+    x0, z0, x1, z1 = cavity_xz
+    y_in, y_out = wall_y
+
+    cavity = shapely_box(x0 + corner_r, z0 + corner_r,
+                         x1 - corner_r, z1 - corner_r).buffer(corner_r, quad_segs=24)
+    opening = cavity.buffer(-frame_w, quad_segs=24)
+    for zone in keep_zones:
+        opening = opening.difference(zone)
+
+    pocket = opening.buffer(groove_w, quad_segs=8)
+    window_cut = _extrude_xz(opening, y_in - 1.0, y_out + 1.0)
+    pocket_cut = _extrude_xz(pocket, y_in - 1.0, y_out - lip_t)
+
+    carved = trimesh.boolean.difference(
+        [case_mesh, trimesh.boolean.union([window_cut, pocket_cut], engine='manifold')],
+        engine='manifold')
+
+    plate_outline = opening.buffer(groove_w - plate_clearance, quad_segs=8)
+    plate_thickness = round((y_out - lip_t) - y_in - 0.1, 2)
+    return carved, plate_outline, plate_thickness
