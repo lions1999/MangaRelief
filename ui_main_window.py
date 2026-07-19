@@ -173,6 +173,11 @@ class MainWindowUI(QMainWindow):
         self.combo_cover_finish.addItems(["B/N (Standard)", "Spot Color"])
         cover_layout.addRow("Finish:", self.combo_cover_finish)
 
+        self.combo_cover_surface = QComboBox()
+        self.combo_cover_surface.addItems(["Engraved (liscia in tasca)", "Raised (rilievo)"])
+        self.combo_cover_surface.setToolTip("Engraved: superficie esterna piana, arte incisa sotto. Raised: arte in rilievo come i pannelli.")
+        cover_layout.addRow("Surface:", self.combo_cover_surface)
+
         self.lbl_cover_scale = QLabel("Zoom: 100%")
         self.slider_cover_scale = QSlider(Qt.Orientation.Horizontal)
         # 100% = riempimento esatto della plate; sotto il 100% l'immagine
@@ -422,7 +427,7 @@ class MainWindowUI(QMainWindow):
         self.lockable_widgets = [
             self.btn_load, self.mode_selector, self.combo_tcg_select,
             self.btn_extract_topo, self.topo_color_list,
-            self.combo_phone_model, self.combo_cover_finish,
+            self.combo_phone_model, self.combo_cover_finish, self.combo_cover_surface,
             self.slider_cover_scale, self.slider_cover_offx,
             self.slider_cover_offy, self.btn_cover_preview, self.chk_cover_bumper,
             self.chk_cover_avoid_camera,

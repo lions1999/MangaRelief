@@ -717,7 +717,8 @@ class Manga3DAppController(MainWindowUI):
             cover_off_y=float(self.slider_cover_offy.value()),
             cover_finish_spot=(self.combo_cover_finish.currentIndex() == 1),
             include_bumper=self.chk_cover_bumper.isChecked(),
-            cover_avoid_camera=self.chk_cover_avoid_camera.isChecked()
+            cover_avoid_camera=self.chk_cover_avoid_camera.isChecked(),
+            cover_engraved=(self.combo_cover_surface.currentIndex() == 0)
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
@@ -793,6 +794,8 @@ class Manga3DAppController(MainWindowUI):
             else:
                 accents = self._get_spot_accents()
             palette  = build_spot_palette(accents)
+            if mode_idx == 4 and self.combo_cover_surface.currentIndex() == 0:
+                palette = palette[::-1]  # inciso: scuro per primo, chiaro in superficie
             layer_h  = self.spin_layer_height.value()
             z_heights = compute_topo_z_heights(self.spin_base.value(),
                                                self.spin_maxh.value(),

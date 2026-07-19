@@ -39,7 +39,8 @@ class MeshWorker(QThread):
                  is_spot_mode=False, spot_accents=None, spot_coverage=40,
                  is_cover_mode=False, cover_preset=None, cover_scale=1.0,
                  cover_off_x=0.0, cover_off_y=0.0, cover_finish_spot=False,
-                 include_bumper=False, cover_avoid_camera=True):
+                 include_bumper=False, cover_avoid_camera=True,
+                 cover_engraved=True):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -71,6 +72,7 @@ class MeshWorker(QThread):
         self.cover_finish_spot = cover_finish_spot
         self.include_bumper = include_bumper
         self.cover_avoid_camera = cover_avoid_camera
+        self.cover_engraved = cover_engraved
         self.cancel_requested = False
 
     @staticmethod
@@ -294,6 +296,11 @@ class MeshWorker(QThread):
                 accents = self.spot_accents if self.cover_finish_spot else []
                 palette, idx_map = classify_spot_pixels(art, accents,
                                                         coverage=self.spot_coverage)
+                if self.cover_engraved:
+                    # Inciso: ordine di stampa invertito (scuro per primo), la
+                    # superficie esterna è il piano chiaro e l'arte sta scavata
+                    palette = palette[::-1]
+                    idx_map = (len(palette) - 1) - idx_map
                 self.img_filtered = np.array(palette, dtype=np.uint8)[idx_map]
                 export_slot_colors = ['#%02x%02x%02x' % tuple(c) for c in palette[1:]]
                 # la plate segue la pipeline Topographic (terrazze + snap)
