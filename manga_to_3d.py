@@ -16,7 +16,8 @@ from utils import resource_path
 from ui_main_window import MainWindowUI
 from color_utils import (extract_dominant_colors, suggest_midtones,
                          suggest_spot_accents, classify_spot_pixels,
-                         downsample_for_analysis, build_spot_palette)
+                         downsample_for_analysis, build_spot_palette,
+                         grayscale_palette)
 from mesh_utils import compute_topo_z_heights, compute_topo_switch_z
 from case_utils import (load_phone_presets, build_plate_raster,
                         build_case_plate_raster, compose_plate_art)
@@ -718,7 +719,8 @@ class Manga3DAppController(MainWindowUI):
             cover_finish_spot=(self.combo_cover_finish.currentIndex() == 1),
             include_bumper=self.chk_cover_bumper.isChecked(),
             cover_avoid_camera=self.chk_cover_avoid_camera.isChecked(),
-            cover_engraved=(self.combo_cover_surface.currentIndex() == 0)
+            cover_engraved=(self.combo_cover_surface.currentIndex() == 0),
+            cover_gray_levels=self.combo_cover_levels.currentIndex() + 2
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
@@ -789,11 +791,13 @@ class Manga3DAppController(MainWindowUI):
         """
         mode_idx = self.mode_selector.currentIndex()
         if mode_idx in (3, 4):  # Spot Color / Phone Cover
-            if mode_idx == 4 and self.combo_cover_finish.currentIndex() == 0:
-                accents = []   # finitura B/N: solo bianco+nero
+            cover_bn = mode_idx == 4 and self.combo_cover_finish.currentIndex() == 0
+            if cover_bn:
+                # finitura B/N: livelli di grigio quantizzati (2-4), non gli accenti Spot
+                palette = grayscale_palette(self.combo_cover_levels.currentIndex() + 2)
             else:
                 accents = self._get_spot_accents()
-            palette  = build_spot_palette(accents)
+                palette = build_spot_palette(accents)
             if mode_idx == 4 and self.combo_cover_surface.currentIndex() == 0:
                 palette = palette[::-1]  # inciso: scuro per primo, chiaro in superficie
             layer_h  = self.spin_layer_height.value()

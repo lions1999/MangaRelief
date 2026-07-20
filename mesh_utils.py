@@ -184,10 +184,13 @@ def compute_topo_switch_z(z_heights: list, layer_height: float) -> list:
 def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
                       base_z: float = 1.0, total_z: float = 2.4,
                       max_dim: float = 100.0, layer_height: float = 0.2,
-                      max_res_cap: int = 800, mask=None):
+                      max_res_cap: int = 800, mask=None, min_feature_mm: float = 0.5):
     """Genera una mesh a terrazze basata sui colori forniti, quantizzata sui layer di stampa.
     mask (opzionale): sagoma booleana della stessa shape dell'immagine (es. plate
-    cover con fori camera); implica che l'immagine sia già alla risoluzione finale."""
+    cover con fori camera); implica che l'immagine sia già alla risoluzione finale.
+    min_feature_mm: soglia di pulizia per dettagli/frange (default 0.5mm, il
+    diametro minimo stampabile in rilievo). Nelle incisioni un solco è assenza
+    di materiale, non una parete: la soglia può scendere fino a ~0.2mm."""
     # Pre-scaling al cap del selettore Mesh Quality (Draft 800 / Standard 1200 / Ultra 1600)
     h, w = image_rgb.shape[:2]
     max_size = int(max_res_cap)
@@ -225,10 +228,9 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
     # 2) solo per i colori saturi: componenti senza "nucleo", cioè più strette di
     #    0.5mm ovunque (le frange di ringing JPEG lungo i bordi neri) -> riassegnate.
     #    I colori neutri sono esclusi per preservare le linee fini bianche/nere.
-    MIN_FEATURE_MM = 0.5
     pitch = max_dim / max(h, w)  # mm per pixel
-    radius_px = max(1, int((MIN_FEATURE_MM / 2.0) / pitch))
-    min_area_px = max(2, int(np.pi * ((MIN_FEATURE_MM / 2.0) / pitch) ** 2))
+    radius_px = max(1, int((min_feature_mm / 2.0) / pitch))
+    min_area_px = max(2, int(np.pi * ((min_feature_mm / 2.0) / pitch) ** 2))
     colors_lab = rgb_to_lab(np.array(sorted_colors_rgb, dtype=np.uint8))
     is_chromatic = np.max(np.abs(colors_lab[:, 1:] - 128.0), axis=1) > 12.0
 

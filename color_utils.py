@@ -216,3 +216,51 @@ def classify_spot_pixels(image_rgb: np.ndarray, accents_rgb: list,
         idx[accent_mask] = 1 + best_accent[accent_mask]
 
     return palette, idx
+
+
+# ---------------------------------------------------------------------------
+# QUANTIZZAZIONE B/N A LIVELLI — la "modalità Standard in miniatura" per cover
+# ---------------------------------------------------------------------------
+
+def grayscale_palette(n_levels: int) -> list:
+    """Palette neutra chiaro->scuro per la quantizzazione a livelli."""
+    n_levels = int(np.clip(n_levels, 2, 4))
+    if n_levels == 2:
+        return [SPOT_BASE_RGB, SPOT_TOP_RGB]
+    if n_levels == 3:
+        return [SPOT_BASE_RGB, (150, 150, 150), SPOT_TOP_RGB]
+    return [SPOT_BASE_RGB, (180, 180, 180), (105, 105, 105), SPOT_TOP_RGB]
+
+
+def quantize_grayscale_levels(image_rgb: np.ndarray, n_levels: int = 3,
+                              white_clip: int = 235, black_clip: int = 15):
+    """Quantizza l'immagine in 2-4 livelli di grigio con i clip calibrati:
+    >= white_clip diventa base bianca, <= black_clip nero pieno, i mezzitoni
+    si distribuiscono sui livelli intermedi (soglie adattive via K-Means).
+    Ritorna (palette chiaro->scuro, indices HxW) come classify_spot_pixels."""
+    gray = cv2.cvtColor(np.ascontiguousarray(image_rgb, np.uint8), cv2.COLOR_RGB2GRAY)
+    n_levels = int(np.clip(n_levels, 2, 4))
+    palette = grayscale_palette(n_levels)
+
+    def _adaptive_split(pixels, fallback):
+        if pixels.size < 500:
+            return fallback
+        crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+        _, _, centers = cv2.kmeans(pixels.reshape(-1, 1).astype(np.float32), 2,
+                                   None, crit, 5, cv2.KMEANS_RANDOM_CENTERS)
+        return float(centers.mean())
+
+    mids = gray[(gray > black_clip) & (gray < white_clip)]
+    if n_levels == 2:
+        t = _adaptive_split(mids, (white_clip + black_clip) / 2.0)
+        idx = np.where(gray >= t, 0, 1).astype(np.intp)
+    elif n_levels == 3:
+        idx = np.full(gray.shape, 1, dtype=np.intp)
+        idx[gray >= white_clip] = 0
+        idx[gray <= black_clip] = 2
+    else:
+        s = _adaptive_split(mids, (white_clip + black_clip) / 2.0)
+        idx = np.where(gray >= s, 1, 2).astype(np.intp)
+        idx[gray >= white_clip] = 0
+        idx[gray <= black_clip] = 3
+    return palette, idx

@@ -178,6 +178,12 @@ class MainWindowUI(QMainWindow):
         self.combo_cover_surface.setToolTip("Engraved: superficie esterna piana, arte incisa sotto. Raised: arte in rilievo come i pannelli.")
         cover_layout.addRow("Surface:", self.combo_cover_surface)
 
+        self.combo_cover_levels = QComboBox()
+        self.combo_cover_levels.addItems(["2 (B/N puro)", "3 (consigliato)", "4 (max dettaglio)"])
+        self.combo_cover_levels.setCurrentIndex(1)
+        self.combo_cover_levels.setToolTip("Livelli di grigio quantizzati: più livelli = più mezzitoni/retini preservati.")
+        cover_layout.addRow("Gray Levels:", self.combo_cover_levels)
+
         self.lbl_cover_scale = QLabel("Zoom: 100%")
         self.slider_cover_scale = QSlider(Qt.Orientation.Horizontal)
         # 100% = riempimento esatto della plate; sotto il 100% l'immagine
@@ -428,6 +434,7 @@ class MainWindowUI(QMainWindow):
             self.btn_load, self.mode_selector, self.combo_tcg_select,
             self.btn_extract_topo, self.topo_color_list,
             self.combo_phone_model, self.combo_cover_finish, self.combo_cover_surface,
+            self.combo_cover_levels,
             self.slider_cover_scale, self.slider_cover_offx,
             self.slider_cover_offy, self.btn_cover_preview, self.chk_cover_bumper,
             self.chk_cover_avoid_camera,
@@ -462,6 +469,8 @@ class MainWindowUI(QMainWindow):
         self.group_cover.setVisible(is_cover)
         # il gruppo Spot serve anche alla finitura Spot della cover
         self.group_spot.setVisible(is_spot or cover_spot)
+        # il selettore livelli grigio serve solo alla finitura B/N della cover
+        self.combo_cover_levels.setVisible(is_cover and not cover_spot)
 
         # Hide standard relief controls when topo/spot/cover are active
         self.group_swatch.setVisible(not (is_topo or is_spot or is_cover))

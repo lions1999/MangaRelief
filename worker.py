@@ -10,7 +10,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from config import DeckboxConfig
 from mesh_utils import (create_solid_mesh, process_mesh_topo, export_3mf,
                         compute_topo_z_heights, compute_topo_switch_z)
-from color_utils import classify_spot_pixels, downsample_for_analysis
+from color_utils import classify_spot_pixels, downsample_for_analysis, quantize_grayscale_levels
 import shutil
 
 from case_utils import (build_plate_raster, build_case_plate_raster,
@@ -40,7 +40,7 @@ class MeshWorker(QThread):
                  is_cover_mode=False, cover_preset=None, cover_scale=1.0,
                  cover_off_x=0.0, cover_off_y=0.0, cover_finish_spot=False,
                  include_bumper=False, cover_avoid_camera=True,
-                 cover_engraved=True):
+                 cover_engraved=True, cover_gray_levels=3):
         super().__init__()
         self.img_filtered = img_filtered
         self.sampled_values = sampled_values
@@ -73,6 +73,7 @@ class MeshWorker(QThread):
         self.include_bumper = include_bumper
         self.cover_avoid_camera = cover_avoid_camera
         self.cover_engraved = cover_engraved
+        self.cover_gray_levels = cover_gray_levels
         self.cancel_requested = False
 
     @staticmethod
@@ -293,9 +294,15 @@ class MeshWorker(QThread):
                                         user_scale=self.cover_scale,
                                         off_x=self.cover_off_x, off_y=self.cover_off_y,
                                         avoid_camera=avoid)
-                accents = self.spot_accents if self.cover_finish_spot else []
-                palette, idx_map = classify_spot_pixels(art, accents,
-                                                        coverage=self.spot_coverage)
+                if self.cover_finish_spot:
+                    palette, idx_map = classify_spot_pixels(art, self.spot_accents,
+                                                            coverage=self.spot_coverage)
+                else:
+                    # B/N: quantizzazione calibrata a livelli (White/Black Clip +
+                    # K-Means sui mezzitoni), non la soglia secca dello Spot a 0 accenti
+                    palette, idx_map = quantize_grayscale_levels(
+                        art, n_levels=self.cover_gray_levels,
+                        white_clip=self.white_clip, black_clip=self.black_clip)
                 if self.cover_engraved:
                     # Inciso: ordine di stampa invertito (scuro per primo), la
                     # superficie esterna è il piano chiaro e l'arte sta scavata
@@ -337,6 +344,14 @@ class MeshWorker(QThread):
                 else:
                     img_rgb = self.img_filtered
 
+                # Le plate cover sono piccole (~70mm): un dettaglio manga da
+                # 0.5mm coprirebbe una frazione enorme del disegno. In incisione
+                # il solco è assenza di materiale (non una parete stampata),
+                # quindi la soglia può scendere ulteriormente.
+                min_feature = 0.5
+                if self.is_cover_mode:
+                    min_feature = 0.25 if self.cover_engraved else 0.35
+
                 mesh = process_mesh_topo(
                     img_rgb,
                     self.topo_colors,
@@ -345,7 +360,8 @@ class MeshWorker(QThread):
                     max_dim=self.max_dim,
                     layer_height=self.layer_height,
                     max_res_cap=self.max_res_cap,
-                    mask=plate_mask
+                    mask=plate_mask,
+                    min_feature_mm=min_feature
                 )
                 self._check_cancel()
                 self.progress.emit(80, "Optimizing Topo Mesh...")
