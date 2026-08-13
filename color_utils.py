@@ -175,28 +175,34 @@ def build_spot_palette(accents_rgb: list) -> list:
     return [SPOT_BASE_RGB] + accents + [SPOT_TOP_RGB]
 
 def classify_spot_pixels(image_rgb: np.ndarray, accents_rgb: list,
-                         coverage: int = 40):
+                         coverage: int = 40, white_clip: int = 235,
+                         black_clip: int = 15):
     """Classifica ogni pixel sulla palette Spot Color:
     [base bianca, accenti ordinati dal più chiaro al più scuro, nero top].
     Un pixel va su un accento se è abbastanza saturo (soglia guidata da
     coverage 0-100: basso = solo pixel vividi, alto = anche sfumature spente)
-    e la sua tinta è entro ±36° da quella dell'accento; tutto il resto viene
-    binarizzato bianco/nero sulla luminosità.
+    e la sua tinta è entro ±36° da quella dell'accento.
+
+    Tutto il resto viene binarizzato bianco/nero con i landmark tonali
+    (tonal_landmarks) calcolati SOLO sui pixel neutri: una soglia fissa a metà
+    luminosità cadrebbe in mezzo alle popolazioni grigie tipiche del fumetto
+    (facciate, ombreggiature), facendole oscillare col rumore e producendo
+    sgranatura invece di superfici coerenti — e peggiorerebbe all'aumentare
+    della risoluzione. white_clip/black_clip agiscono come sicurezza sugli
+    estremi, coerentemente con le altre modalità.
     Ritorna (palette_rgb, indices HxW di indici nella palette)."""
     palette = build_spot_palette(accents_rgb)
     accents = palette[1:-1]
     n = len(palette)
-    h, w = image_rgb.shape[:2]
 
     img_u8 = np.ascontiguousarray(image_rgb, np.uint8)
     hsv = cv2.cvtColor(img_u8, cv2.COLOR_RGB2HSV)
-    lum = rgb_to_lab(img_u8)[..., 0]
+    gray = cv2.cvtColor(img_u8, cv2.COLOR_RGB2GRAY)
 
-    # Neutri: binarizzazione bianco/nero sul punto medio di luminosità
-    pal_lab = rgb_to_lab(np.array(palette, dtype=np.uint8))
-    lum_split = (pal_lab[0, 0] + pal_lab[-1, 0]) / 2.0
-    idx = np.where(lum >= lum_split, 0, n - 1).astype(np.intp)
-
+    # 1) Maschera accenti: va calcolata PRIMA, così l'analisi tonale dei neutri
+    #    non viene falsata dai pixel colorati del soggetto
+    accent_mask = np.zeros(gray.shape, dtype=bool)
+    best_accent = None
     if accents:
         accent_hues = cv2.cvtColor(
             np.array(accents, dtype=np.uint8).reshape(-1, 1, 3),
@@ -213,6 +219,17 @@ def classify_spot_pixels(image_rgb: np.ndarray, accents_rgb: list,
         sat_min = int(np.clip(170 - 1.5 * coverage, 15, 170))
         accent_mask = ((hsv[..., 1] >= sat_min) & (hsv[..., 2] >= SPOT_V_MIN)
                        & (best_dist <= SPOT_HUE_TOL))
+
+    # 2) Neutri: soglia dai landmark tonali dei soli pixel non-accento
+    neutral_pixels = gray[~accent_mask] if accent_mask.any() else gray
+    white_v, _l1, _l2, black_v = tonal_landmarks(neutral_pixels)
+    idx = np.where(np.abs(gray.astype(np.float32) - white_v) <=
+                   np.abs(gray.astype(np.float32) - black_v), 0, n - 1).astype(np.intp)
+    idx[gray >= white_clip] = 0
+    idx[gray <= black_clip] = n - 1
+
+    # 3) Gli accenti hanno la precedenza sulla binarizzazione
+    if accents:
         idx[accent_mask] = 1 + best_accent[accent_mask]
 
     return palette, idx
@@ -221,6 +238,21 @@ def classify_spot_pixels(image_rgb: np.ndarray, accents_rgb: list,
 # ---------------------------------------------------------------------------
 # QUANTIZZAZIONE B/N A LIVELLI — la "modalità Standard in miniatura" per cover
 # ---------------------------------------------------------------------------
+
+def tonal_landmarks(gray_pixels: np.ndarray) -> np.ndarray:
+    """4 landmark tonali stabili (bianco, L1, L2, nero) trovati SEMPRE con lo
+    stesso K=4 della modalità Standard (vedi suggest_midtones), ordinati dal
+    più chiaro. Ancorarsi a 4 landmark fissi — invece di un K-Means con k pari
+    ai livelli richiesti — è ciò che rende la classificazione stabile quando le
+    popolazioni tonali reali dell'immagine non corrispondono ai livelli chiesti.
+    Ritorna un array [white, l1, l2, black]."""
+    flat = np.asarray(gray_pixels).reshape(-1, 1).astype(np.float32)
+    if flat.shape[0] >= 500:
+        crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 15, 1.0)
+        _, _, centers = cv2.kmeans(flat, 4, None, crit, 8, cv2.KMEANS_PP_CENTERS)
+        return np.sort(centers.flatten())[::-1]
+    return np.array([220.0, 165.0, 90.0, 35.0], dtype=np.float32)
+
 
 def grayscale_palette(n_levels: int) -> list:
     """Palette neutra chiaro->scuro per la quantizzazione a livelli."""
@@ -250,13 +282,7 @@ def quantize_grayscale_levels(image_rgb: np.ndarray, n_levels: int = 3,
     n_levels = int(np.clip(n_levels, 2, 4))
     palette = grayscale_palette(n_levels)
 
-    flat = gray.reshape(-1, 1).astype(np.float32)
-    if flat.shape[0] >= 500:
-        crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 15, 1.0)
-        _, _, centers = cv2.kmeans(flat, 4, None, crit, 8, cv2.KMEANS_PP_CENTERS)
-        white_v, l1_v, l2_v, black_v = np.sort(centers.flatten())[::-1]
-    else:
-        white_v, l1_v, l2_v, black_v = 220.0, 165.0, 90.0, 35.0
+    white_v, l1_v, l2_v, black_v = tonal_landmarks(gray)
 
     # Stesso sottoinsieme di landmark della modalità Standard: 3 livelli
     # nasconde L1 (chiaro-medio), 2 livelli tiene solo gli estremi

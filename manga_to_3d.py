@@ -10,7 +10,7 @@ import ctypes
 
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QListWidgetItem
 from PyQt6.QtGui import QColor
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 
 from utils import resource_path
 from ui_main_window import MainWindowUI
@@ -104,6 +104,10 @@ class Manga3DAppController(MainWindowUI):
             btn.clicked.connect(lambda checked, idx=i: self.set_active_spot_swatch(idx))
         self.slider_spot_coverage.valueChanged.connect(self._on_spot_coverage_changed)
         self.combo_spot_naccents.currentIndexChanged.connect(lambda _: self._refresh_spot_mockup())
+        # Questi ora influenzano anche la classificazione Spot: tengono vivo il mockup
+        self.spin_white_clip.valueChanged.connect(lambda _: self._refresh_spot_mockup())
+        self.spin_black_clip.valueChanged.connect(lambda _: self._refresh_spot_mockup())
+        self.cmb_quality.currentIndexChanged.connect(lambda _: self._refresh_spot_mockup())
         self.btn_spot_mockup.toggled.connect(self._on_spot_mockup_toggled)
 
     def _update_viewport_mode(self, index):
@@ -207,6 +211,17 @@ class Manga3DAppController(MainWindowUI):
     # SPOT COLOR — picking, auto-detect, mockup
     # ------------------------------------------------------------------
 
+    def _current_max_res_cap(self) -> int:
+        """Cap di risoluzione dal selettore Mesh Quality. Usato sia dalla
+        generazione sia dalle anteprime, così il mockup mostra esattamente
+        la stessa classificazione del file esportato."""
+        quality_str = self.cmb_quality.currentText()
+        if "800" in quality_str:
+            return 800
+        if "1600" in quality_str:
+            return 1600
+        return 1200
+
     def _get_spot_accents(self):
         """Accenti attivi (1 o 2 in base al selettore), senza i None."""
         n = self.combo_spot_naccents.currentIndex() + 1
@@ -266,22 +281,38 @@ class Manga3DAppController(MainWindowUI):
             self.btn_spot_mockup.setChecked(False)
             return
         if checked:
-            self._refresh_spot_mockup()
+            self._do_refresh_spot_mockup()   # immediato all'accensione
             self.btn_spot_mockup.setText("👁 Back to Original")
         else:
             self.btn_spot_mockup.setText("👁 Mockup Preview")
             self._update_viewport_mode(self.mode_selector.currentIndex())
 
     def _refresh_spot_mockup(self):
-        """Ricalcola l'anteprima posterizzata (solo se il mockup è attivo)."""
+        """Richiede un ricalcolo dell'anteprima, accorpando le richieste
+        ravvicinate: alla risoluzione di generazione un refresh costa
+        centinaia di ms, e trascinare uno slider ne genererebbe decine."""
+        if not self.btn_spot_mockup.isChecked():
+            return
+        if getattr(self, '_spot_mockup_timer', None) is None:
+            self._spot_mockup_timer = QTimer(self)
+            self._spot_mockup_timer.setSingleShot(True)
+            self._spot_mockup_timer.timeout.connect(self._do_refresh_spot_mockup)
+        self._spot_mockup_timer.start(180)
+
+    def _do_refresh_spot_mockup(self):
+        """Ricalcola davvero l'anteprima posterizzata."""
         if not self.btn_spot_mockup.isChecked():
             return
         if getattr(self, 'img_rgb_original', None) is None:
             return
-        # A ~800px la classificazione è istantanea e l'anteprima resta fedele
-        small = downsample_for_analysis(self.img_rgb_original)
-        palette, idx = classify_spot_pixels(small, self._get_spot_accents(),
-                                            coverage=self.slider_spot_coverage.value())
+        # Stessa risoluzione della generazione: a 800px fissi l'anteprima
+        # mostrava più sgranatura di quella che sarebbe finita nel file
+        small = downsample_for_analysis(self.img_rgb_original, self._current_max_res_cap())
+        palette, idx = classify_spot_pixels(
+            small, self._get_spot_accents(),
+            coverage=self.slider_spot_coverage.value(),
+            white_clip=self.spin_white_clip.value(),
+            black_clip=self.spin_black_clip.value())
         self.spot_preview_array = np.array(palette, dtype=np.uint8)[idx]
         self.viewer.setImage(self.spot_preview_array)
         names = ", ".join(f"RGB{p}" for p in palette)
@@ -671,14 +702,7 @@ class Manga3DAppController(MainWindowUI):
         self.toggle_ui_state(disabled=True)
         self.progress_bar.setValue(0)
 
-        # --- Parse selected quality ---
-        quality_str = self.cmb_quality.currentText()
-        if "800" in quality_str:
-            max_res_cap = 800
-        elif "1600" in quality_str:
-            max_res_cap = 1600
-        else:
-            max_res_cap = 1200
+        max_res_cap = self._current_max_res_cap()
 
         # --- Launch background QThread ---
 

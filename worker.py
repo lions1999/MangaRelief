@@ -295,8 +295,9 @@ class MeshWorker(QThread):
                                         off_x=self.cover_off_x, off_y=self.cover_off_y,
                                         avoid_camera=avoid)
                 if self.cover_finish_spot:
-                    palette, idx_map = classify_spot_pixels(art, self.spot_accents,
-                                                            coverage=self.spot_coverage)
+                    palette, idx_map = classify_spot_pixels(
+                        art, self.spot_accents, coverage=self.spot_coverage,
+                        white_clip=self.white_clip, black_clip=self.black_clip)
                 else:
                     # B/N: quantizzazione calibrata a livelli (White/Black Clip +
                     # K-Means sui mezzitoni), non la soglia secca dello Spot a 0 accenti
@@ -322,8 +323,9 @@ class MeshWorker(QThread):
                 else:
                     img_rgb_src = self.img_filtered
                 small = downsample_for_analysis(img_rgb_src, self.max_res_cap)
-                palette, idx_map = classify_spot_pixels(small, self.spot_accents,
-                                                        coverage=self.spot_coverage)
+                palette, idx_map = classify_spot_pixels(
+                    small, self.spot_accents, coverage=self.spot_coverage,
+                    white_clip=self.white_clip, black_clip=self.black_clip)
                 self.img_filtered = np.array(palette, dtype=np.uint8)[idx_map]
                 # Nei metadata 3MF finiscono i colori reali della palette (non i grigi)
                 export_slot_colors = ['#%02x%02x%02x' % tuple(c) for c in palette[1:]]
