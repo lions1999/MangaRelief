@@ -166,6 +166,14 @@ def suggest_spot_accents(image_rgb: np.ndarray, n_accents: int = 2) -> list:
 SPOT_HUE_TOL = 18
 SPOT_V_MIN = 60
 
+# Soglia di luminosità RELATIVA a quella dell'accento, interpolata dal coverage.
+# Scurire un colore saturo non ne cambia né tinta né saturazione (in HSV cala
+# solo V): senza questa soglia una linea nera fusa col rosso circostante resta
+# "rossa e satura" e viene assorbita dall'accento, cancellando tutto il tratto
+# di contorno interno alle campiture (ragnatele, inchiostrazioni, retini).
+SPOT_V_RATIO_AT_0 = 0.75    # coverage 0   -> solo il colore pieno diventa accento
+SPOT_V_RATIO_AT_100 = 0.15  # coverage 100 -> l'accento prende anche le ombre
+
 def build_spot_palette(accents_rgb: list) -> list:
     """Palette Spot Color ordinata per la stampa:
     [base bianca, accenti dal più chiaro al più scuro, nero top]."""
@@ -217,7 +225,19 @@ def classify_spot_pixels(image_rgb: np.ndarray, accents_rgb: list,
 
         # coverage guida la saturazione minima: 0 -> solo vividi, 100 -> quasi tutto
         sat_min = int(np.clip(170 - 1.5 * coverage, 15, 170))
-        accent_mask = ((hsv[..., 1] >= sat_min) & (hsv[..., 2] >= SPOT_V_MIN)
+
+        # ...e la luminosità minima, RELATIVA a quella dell'accento stesso: un
+        # pixel molto più scuro del colore scelto è un contorno o un'ombra, non
+        # la campitura piena. SPOT_V_MIN resta come pavimento assoluto, così a
+        # coverage 100 il comportamento coincide con quello storico.
+        accent_v = cv2.cvtColor(np.array(accents, dtype=np.uint8).reshape(-1, 1, 3),
+                                cv2.COLOR_RGB2HSV)[:, 0, 2].astype(np.float32)
+        ratio = SPOT_V_RATIO_AT_0 + (SPOT_V_RATIO_AT_100 - SPOT_V_RATIO_AT_0) * (
+            np.clip(coverage, 0, 100) / 100.0)
+        v_floor = np.maximum(SPOT_V_MIN, accent_v * ratio)
+
+        accent_mask = ((hsv[..., 1] >= sat_min)
+                       & (hsv[..., 2] >= v_floor[best_accent])
                        & (best_dist <= SPOT_HUE_TOL))
 
     # 2) Neutri: soglia dai landmark tonali dei soli pixel non-accento
