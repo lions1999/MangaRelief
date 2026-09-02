@@ -1,6 +1,10 @@
 numpy==1.26.4
 opencv-python==4.9.0.80
 trimesh==4.1.7
+# Necessario a trimesh per l'export 3MF: l'esportatore viene registrato solo
+# se lxml è importabile, altrimenti ogni salvataggio 3MF muore con
+# ModuleNotFoundError (verificato su trimesh 4.1.7 in un venv pulito).
+lxml
 networkx
 matplotlib
 pillow

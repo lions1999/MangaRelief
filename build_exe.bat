@@ -8,6 +8,8 @@ pyinstaller --noconfirm --onedir --windowed --icon "icon.ico" ^
   --hidden-import scipy ^
   --hidden-import sklearn ^
   --hidden-import trimesh ^
+  --hidden-import lxml ^
+  --hidden-import lxml.etree ^
   --hidden-import PIL ^
   --hidden-import pillow_heif ^
   --hidden-import fast_simplification ^
