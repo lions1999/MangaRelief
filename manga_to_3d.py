@@ -14,12 +14,13 @@ from PyQt6.QtCore import Qt, QTimer
 
 from utils import resource_path
 from ui_main_window import MainWindowUI
-from color_utils import (extract_dominant_colors, suggest_midtones,
+from engine import GenerationMode, GenerationParams
+from engine.color_utils import (extract_dominant_colors, suggest_midtones,
                          suggest_spot_accents, classify_spot_pixels,
                          downsample_for_analysis, build_spot_palette,
                          grayscale_palette)
-from mesh_utils import compute_topo_z_heights, compute_topo_switch_z
-from case_utils import (load_phone_presets, build_plate_raster,
+from engine.mesh_utils import compute_topo_z_heights, compute_topo_switch_z
+from engine.case_utils import (load_phone_presets, build_plate_raster,
                         build_case_plate_raster, compose_plate_art)
 from worker import MeshWorker
 
@@ -210,6 +211,19 @@ class Manga3DAppController(MainWindowUI):
     # ------------------------------------------------------------------
     # SPOT COLOR — picking, auto-detect, mockup
     # ------------------------------------------------------------------
+
+    # Indice del selettore di modalità -> modalità del motore
+    _MODE_BY_INDEX = {
+        0: GenerationMode.STANDARD,
+        1: GenerationMode.TOPOGRAPHIC,
+        2: GenerationMode.DECKBOX,
+        3: GenerationMode.SPOT_COLOR,
+        4: GenerationMode.PHONE_COVER,
+    }
+
+    def _current_generation_mode(self) -> str:
+        return self._MODE_BY_INDEX.get(self.mode_selector.currentIndex(),
+                                       GenerationMode.STANDARD)
 
     def _current_max_res_cap(self) -> int:
         """Cap di risoluzione dal selettore Mesh Quality. Usato sia dalla
@@ -712,40 +726,37 @@ class Manga3DAppController(MainWindowUI):
         is_spot = (self.mode_selector.currentIndex() == 3)
         input_img = self.img_rgb_original if (is_topo or is_spot or is_cover) else self.img_filtered_array
 
-        self.worker = MeshWorker(
-            img_filtered=input_img,
-            sampled_values=self.sampled_colors,
+        params = GenerationParams(
+            mode=self._current_generation_mode(),
             max_dim=self.spin_dim.value(),
-            max_h=max_h,
             base_h=base_h,
-            output_path=save_path_stl,
-            output_path_3mf=save_path_3mf,
-            color_changes_z=color_changes_z,
+            max_h=max_h,
             layer_height=self.spin_layer_height.value(),
             max_res_cap=max_res_cap,
             smart_decimate=self.chk_smart_decimate.isChecked(),
             white_clip=self.spin_white_clip.value(),
             black_clip=self.spin_black_clip.value(),
+            sampled_values=self.sampled_colors,
             color_mode=getattr(self, 'color_mode_state', 4),
-            is_deckbox_mode=(self.mode_selector.currentIndex() == 2),
-            tcg_name=self.combo_tcg_select.currentText(),
-            is_topo_mode=is_topo,
+            color_changes_z=color_changes_z,
             topo_colors=topo_colors,
-            source_image_name=base_name,
-            is_spot_mode=is_spot,
             spot_accents=self._get_spot_accents(),
             spot_coverage=self.slider_spot_coverage.value(),
-            is_cover_mode=is_cover,
+            tcg_name=self.combo_tcg_select.currentText(),
             cover_preset=self._current_phone_preset(),
             cover_scale=self.slider_cover_scale.value() / 100.0,
             cover_off_x=float(self.slider_cover_offx.value()),
             cover_off_y=float(self.slider_cover_offy.value()),
             cover_finish_spot=(self.combo_cover_finish.currentIndex() == 1),
-            include_bumper=self.chk_cover_bumper.isChecked(),
             cover_avoid_camera=self.chk_cover_avoid_camera.isChecked(),
             cover_engraved=(self.combo_cover_surface.currentIndex() == 0),
-            cover_gray_levels=self.combo_cover_levels.currentIndex() + 2
+            cover_gray_levels=self.combo_cover_levels.currentIndex() + 2,
+            include_bumper=self.chk_cover_bumper.isChecked(),
+            output_path=save_path_stl,
+            output_path_3mf=save_path_3mf,
+            source_image_name=base_name,
         )
+        self.worker = MeshWorker(params, input_img)
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_ok.connect(self.on_generate_done)
         self.worker.finished_err.connect(self.on_generate_error)

@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 from scipy.spatial import cKDTree
 
-from config import SPOT_BASE_RGB, SPOT_TOP_RGB
+from .config import SPOT_BASE_RGB, SPOT_TOP_RGB
 
 # Peso della cromaticità (canali a/b) nel matching pixel->colore: con la distanza
 # Lab pura un grigio medio risulta più "vicino" a un rosso saturo che al nero,

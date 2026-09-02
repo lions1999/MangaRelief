@@ -8,8 +8,8 @@ from scipy.spatial import cKDTree
 from scipy.ndimage import (median_filter, label, binary_erosion,
                            distance_transform_edt)
 
-from config import SLOT_COLORS_3MF
-from color_utils import rgb_to_lab, CHROMA_MATCH_WEIGHT
+from .config import SLOT_COLORS_3MF
+from .color_utils import rgb_to_lab, CHROMA_MATCH_WEIGHT
 
 def create_solid_mesh(X, Y, Z, bottom_z=0.0, mask=None):
     """

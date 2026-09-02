@@ -20,7 +20,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import box as shapely_box
 
-from utils import resource_path
+from .resources import asset_path
 
 
 def _rounded_rect(w: float, h: float, r: float):
@@ -131,7 +131,7 @@ def compute_plate_dims(phone_w: float, phone_h: float, corner_r: float,
 def load_phone_presets() -> dict:
     """Carica i preset telefono dal JSON in assets (misure indicative:
     la finestra fotocamera va verificata col righello sul telefono reale)."""
-    path = resource_path(os.path.join("assets", "phone_presets.json"))
+    path = asset_path("phone_presets.json")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -197,7 +197,7 @@ def build_plate_raster(preset: dict, max_res_cap: int = 1200):
     """Costruisce la maschera raster della back plate dal preset telefono:
     sagoma arrotondata (dimensioni da compute_plate_dims) meno i fori camera.
     Ritorna (mask HxW, res_mm_per_px, plate_dims)."""
-    from mesh_utils import rounded_rect_mask
+    from .mesh_utils import rounded_rect_mask
 
     pd = compute_plate_dims(preset['width'], preset['height'], preset['corner_radius'])
     W, H = pd['width'], pd['height']
