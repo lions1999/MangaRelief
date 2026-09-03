@@ -487,5 +487,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
             result.companion_path = companion
 
     emit(100, "Export completed!")
+    result.color_changes_z = [round(float(z), 3)
+                              for z in (export_changes_z or []) if z > 0]
+    result.slot_colors = list(export_slot_colors or [])
     result.elapsed_s = time.time() - t_start_total
     return result

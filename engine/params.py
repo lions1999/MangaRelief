@@ -99,3 +99,10 @@ class GenerationResult:
     mf3_path: Optional[str] = None
     companion_path: Optional[str] = None   # bumper/case TPU della modalità cover
     elapsed_s: float = 0.0
+
+    # Il piano di stampa: a quali Z cambiare filamento e con quale colore.
+    # Il 3MF se lo porta dentro, ma chi stampa dallo STL ha solo questi numeri
+    # per sapere cosa fare, quindi il motore li restituisce invece di
+    # lasciarli sepolti nel file.
+    color_changes_z: List[float] = field(default_factory=list)
+    slot_colors: List[str] = field(default_factory=list)   # '#rrggbb', dal 2° slot
