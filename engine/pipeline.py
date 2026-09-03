@@ -151,6 +151,23 @@ def _get_z_mapping(p: GenerationParams):
         return x_pts[s_idx], y_pts[s_idx], p.base_h, p.max_h
 
 
+def standard_heightmap(gray, params: GenerationParams):
+    """Quota Z di ogni pixel in modalità Standard/Deckbox.
+
+    È il cuore del rilievo: l'interpolazione lineare a tratti fra i toni
+    campionati e le quote di cambio colore, coi due estremi bloccati sul
+    fondo e sulla superficie. Pubblica perché serve anche a chi vuole
+    *mostrare* dove finirà ogni tono senza generare la mesh — un'anteprima
+    che la ricalcolasse per conto suo divergerebbe alla prima modifica.
+    """
+    x_pts, y_pts, floor_z, surface_z = _get_z_mapping(params)
+    flat = gray.flatten()
+    z = np.round(np.interp(flat, x_pts, y_pts), 3)
+    z[flat <= params.black_clip] = surface_z
+    z[flat >= params.white_clip] = floor_z
+    return z.reshape(gray.shape)
+
+
 def _decimate(mesh, allowed_z=None):
     """Riduce la mesh sopra la soglia, poi (in topo) ri-snappa le quote alle
     terrazze: la decimazione inclina le pareti verticali e lo slicer mostrerebbe
@@ -373,17 +390,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
 
         # --- 2. Z-Mapping & Heightmap ---
         emit(20, "Applying Piecewise Interpolation (Z Mapping)...")
-        x_pts, y_pts, floor_z, surface_z = _get_z_mapping(p)
-
-        Z_flat = np.interp(img.flatten(), x_pts, y_pts)
-        Z_flat = np.round(Z_flat, 3)
-
-        # Clamp extremes for pure black/white
-        Z_flat[img.flatten() <= p.black_clip] = surface_z
-        Z_flat[img.flatten() >= p.white_clip] = floor_z
-
+        Z = standard_heightmap(img, p)
         h, w = img.shape
-        Z = Z_flat.reshape((h, w))
 
         # --- 3. Grid & Geometry ---
         if w >= h:
