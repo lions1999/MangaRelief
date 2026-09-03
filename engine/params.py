@@ -41,6 +41,12 @@ class GenerationParams:
     sampled_values: List[int] = field(default_factory=lambda: [250, 210, 150, 15])
     color_mode: int = 4             # 2/3/4 colori della modalità Standard
     color_changes_z: List[float] = field(default_factory=lambda: [1.4, 2.0, 2.4])
+    # Solo a 2 colori. None = percorso storico: sfoca la ridotta e soglia a
+    # (L0+L3)/2, cioe' quello che fanno gli swatch Paper/Ink del desktop.
+    # Un valore 0..1 attiva la binarizzazione per copertura: l'inchiostro si
+    # decide a piena risoluzione e una zona diventa nera quando almeno questa
+    # frazione della sua area e' inchiostrata. Vedi bw_coverage_map.
+    bw_coverage: Optional[float] = None
 
     # --- Topographic ---
     topo_colors: Optional[List[Tuple[int, int, int]]] = None

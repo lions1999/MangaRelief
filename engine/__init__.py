@@ -16,6 +16,7 @@ from .params import GenerationMode, GenerationParams, GenerationResult
 from .pipeline import (generate, companion_path_for, standard_heightmap,
                        prepare_source_image,
                        TCG_LOGO_MAP)
+from .color_utils import bw_coverage_map, ink_level
 from .resources import asset_path, assets_dir, set_assets_dir
 
 __all__ = [
@@ -26,6 +27,8 @@ __all__ = [
     "companion_path_for",
     "standard_heightmap",
     "prepare_source_image",
+    "bw_coverage_map",
+    "ink_level",
     "TCG_LOGO_MAP",
     "asset_path",
     "assets_dir",

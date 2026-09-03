@@ -21,7 +21,7 @@ from .params import GenerationParams, GenerationResult
 from .resources import asset_path
 from .mesh_utils import (create_solid_mesh, process_mesh_topo, export_3mf,
                          compute_topo_z_heights, compute_topo_switch_z)
-from .color_utils import (classify_spot_pixels, downsample_for_analysis,
+from .color_utils import (bw_coverage_map, classify_spot_pixels, downsample_for_analysis,
                           quantize_grayscale_levels)
 from .case_utils import (build_plate_raster, build_case_plate_raster,
                          compose_plate_art, build_bumper)
@@ -97,6 +97,24 @@ def posterize_tones(img, p: GenerationParams):
     return img
 
 
+# Finestra su cui si misura la copertura d'inchiostro a 2 colori, in mm.
+# Misurata, non scelta: a 180 mm su 800 px (0,225 mm/cella) sono 3 celle.
+#   1 cella  -> il taglio non ha effetto sul tratteggio (aliasing puro: righe
+#               alternate qualunque valore si scelga)
+#   3 celle  -> tratti sottili conservati all'86-96% con taglio 0,25-0,35
+#               (lo storico ne conservava il 63%), ombre decise dal taglio
+#   5 celle  -> il testo dei balloon sparisce: un tratto da 0,3 mm copre meno
+#               di meta' di una finestra da 1,1 mm
+BW_WINDOW_MM = 0.7
+
+
+def _target_size(shape, p: GenerationParams):
+    h, w = shape[:2]
+    target_res = min(int(p.max_dim / 0.05), p.max_res_cap)
+    scale = target_res / max(w, h)
+    return (int(w * scale), int(h * scale)), target_res
+
+
 def prepare_source_image(img, p: GenerationParams):
     """Porta l'immagine alla risoluzione della mesh e la posterizza.
 
@@ -105,12 +123,18 @@ def prepare_source_image(img, p: GenerationParams):
     passare di qui, non ricostruirsela.
     """
     img = _as_gray(img)
-    h, w = img.shape
-    target_res = min(int(p.max_dim / 0.05), p.max_res_cap)
+    (new_w, new_h), target_res = _target_size(img.shape, p)
 
-    if max(w, h) != target_res:
-        scale_res = target_res / max(w, h)
-        new_w, new_h = int(w * scale_res), int(h * scale_res)
+    if p.color_mode == 2 and p.bw_coverage is not None:
+        # Percorso per copertura: l'inchiostro si decide sull'immagine intera,
+        # prima di qualunque ridimensionamento, e la soglia e' una frazione di
+        # area — vedi color_utils.bw_coverage_map.
+        mm_per_px = p.max_dim / target_res
+        window = int(round(BW_WINDOW_MM / mm_per_px))
+        frac = bw_coverage_map(img, (new_w, new_h), window)
+        return np.where(frac >= float(p.bw_coverage), 0, 255).astype(np.uint8)
+
+    if max(img.shape[1], img.shape[0]) != target_res:
         img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
 
     return posterize_tones(img, p)

@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from typing import Optional
 from sklearn.cluster import KMeans
 from scipy.spatial import cKDTree
 
@@ -345,3 +346,50 @@ def quantize_grayscale_levels(image_rgb: np.ndarray, n_levels: int = 3,
     idx[gray >= white_clip] = 0
     idx[gray <= black_clip] = n_levels - 1
     return palette, idx
+
+
+# ---------------------------------------------------------------------------
+# Binarizzazione per copertura (modalita' 2 colori)
+# ---------------------------------------------------------------------------
+
+def ink_level(gray: np.ndarray) -> int:
+    """Il grigio sotto cui un pixel e' inchiostro, letto dall'istogramma (Otsu).
+
+    Una scansione di line art e' bimodale — carta da una parte, inchiostro
+    dall'altra, quasi nulla in mezzo — e Otsu trova la valle fra i due picchi
+    qualunque sia la gamma dello scanner. Qui il valore serve a decidere cosa
+    *conta* come inchiostro a piena risoluzione; quanto inchiostro serva perche'
+    una zona diventi nera e' un'altra domanda, ed e' bw_coverage.
+    """
+    level, _ = cv2.threshold(np.ascontiguousarray(gray, np.uint8), 0, 255,
+                             cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return int(level)
+
+
+def bw_coverage_map(gray: np.ndarray, target_wh, window_px: int,
+                    level: Optional[int] = None) -> np.ndarray:
+    """Frazione di area inchiostrata attorno a ogni cella della mesh, 0..1.
+
+    Binarizza a piena risoluzione (cosi' un tratto sottile conta come
+    inchiostro e non come il grigio in cui lo scioglierebbe un ridimensionamento),
+    riduce con media d'area alla risoluzione della mesh — che e' gia' una
+    frazione d'inchiostro per cella — e la media su una finestra di
+    `window_px` celle, cioe' la scala fisica a cui la stampante puo' davvero
+    distinguere le cose.
+
+    Soglia globale su un'immagine sfocata e questa misura coincidono per una
+    scansione pulita; divergono dove conta: sul tratteggio, dove la prima
+    confronta un grigio medio con un numero fisso e ribalta l'intera zona da una
+    parte, mentre qui il parametro e' la copertura stessa, monotono e leggibile.
+    """
+    if level is None:
+        level = ink_level(gray)
+    # <= e non <: cv2 restituisce la soglia t per cui "sfondo" e' gray > t, e
+    # su un'immagine a due soli valori t coincide col valore dell'inchiostro.
+    ink = (np.asarray(gray) <= level).astype(np.float32)
+    tw, th = int(target_wh[0]), int(target_wh[1])
+    frac = cv2.resize(ink, (tw, th), interpolation=cv2.INTER_AREA)
+    win = max(1, int(window_px)) | 1          # dispari, centrata sulla cella
+    if win > 1:
+        frac = cv2.blur(frac, (win, win), borderType=cv2.BORDER_REFLECT)
+    return frac
