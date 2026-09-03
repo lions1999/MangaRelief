@@ -19,7 +19,7 @@ import fast_simplification
 from .config import DeckboxConfig
 from .params import GenerationParams, GenerationResult
 from .resources import asset_path
-from .mesh_utils import (create_solid_mesh, process_mesh_topo, export_3mf,
+from .mesh_utils import (standard_switch_z, create_solid_mesh, process_mesh_topo, export_3mf,
                          compute_topo_z_heights, compute_topo_switch_z)
 from .color_utils import (bw_coverage_map, classify_spot_pixels, downsample_for_analysis,
                           quantize_grayscale_levels)
@@ -66,6 +66,29 @@ def _as_gray(img):
     return img
 
 
+def _tone_knots(p: GenerationParams):
+    """I due toni intermedi, forzati in ordine dentro (black_clip, white_clip).
+
+    Usati sia per posterizzare sia come nodi della rampa: devono essere gli
+    stessi numeri, altrimenti un pixel posterizzato a un tono cadrebbe fra due
+    nodi e la sua terrazza finirebbe a una quota che nessuno ha dichiarato.
+    """
+    lo, hi = int(p.black_clip) + 1, int(p.white_clip) - 1
+    l2 = int(np.clip(p.sampled_values[2], lo, hi - 1))
+    l1 = int(np.clip(p.sampled_values[1], l2 + 1, hi))
+    return l2, l1
+
+
+def tone_targets(p: GenerationParams):
+    """I grigi a cui la modalita' posterizza: uno per bobina, dal nero alla carta."""
+    l2, l1 = _tone_knots(p)
+    if p.color_mode == 2:
+        return [0, 255]
+    if p.color_mode == 3:
+        return [0, l2, 255]
+    return [0, l2, l1, 255]
+
+
 def posterize_tones(img, p: GenerationParams):
     """Riduce il grigio ai soli livelli che la modalità stampa davvero.
 
@@ -87,10 +110,7 @@ def posterize_tones(img, p: GenerationParams):
         bw_threshold = int(np.clip(bw_threshold, 1, 254))
         _, img = cv2.threshold(img, bw_threshold, 255, cv2.THRESH_BINARY)
     else:
-        if p.color_mode == 3:
-            targets = np.array([0, p.sampled_values[2], 255])
-        else:
-            targets = np.array([0, p.sampled_values[2], p.sampled_values[1], 255])
+        targets = np.array(tone_targets(p))
 
         idx = np.abs(img[..., np.newaxis] - targets).argmin(axis=-1)
         img = targets[idx].astype(np.uint8)
@@ -144,8 +164,15 @@ def _get_z_mapping(p: GenerationParams):
     """Calculates X and Y points for piecewise linear interpolation."""
     L1_Z = p.color_changes_z[0]
     L2_Z = p.color_changes_z[1]
-    l1_target = p.sampled_values[1]
-    l2_target = p.sampled_values[2]
+    # I nodi della rampa stanno SUI toni campionati, non sul loro punto medio
+    # e su white_clip-1 come in origine: l'immagine arriva qui gia'
+    # posterizzata esattamente a quei toni, quindi solo il valore della rampa
+    # in quei punti conta — e li' deve valere la quota che la UI dichiara.
+    # Con i nodi vecchi la terrazza "L1" di un pannello vero finiva a 1,512
+    # invece che a 1,40: fuori layer, e con 0,4 mm di parete del colore sotto.
+    # Ordine forzato black_clip < L2 < L1 < white_clip, altrimenti np.interp
+    # e' indefinita.
+    l2_target, l1_target = _tone_knots(p)
 
     # A 3 colori il selettore nasconde L1 e lascia in gioco L2 (vedi
     # _compute_auto_z / manga_to_3d._refresh_color_mode): l'unico livello
@@ -175,11 +202,10 @@ def _get_z_mapping(p: GenerationParams):
         mid_deboss = deboss_floor + mid_ratio * deboss_depth
 
         if p.color_mode == 4:
-            midpoint = (l2_target + l1_target) / 2.0
-            x_pts = [0, p.black_clip, midpoint, p.white_clip - 1, p.white_clip, 255]
+            x_pts = [0, p.black_clip, l2_target, l1_target, p.white_clip, 255]
             y_pts = [deboss_surface, deboss_surface, L2_deboss, L1_deboss, deboss_floor, deboss_floor]
         elif p.color_mode == 3:
-            x_pts = [0, p.black_clip, p.white_clip - 1, p.white_clip, 255]
+            x_pts = [0, p.black_clip, l2_target, p.white_clip, 255]
             y_pts = [deboss_surface, deboss_surface, mid_deboss, deboss_floor, deboss_floor]
         else:  # 2 Colors
             x_pts = [0, p.black_clip, p.white_clip - 1, p.white_clip, 255]
@@ -190,11 +216,10 @@ def _get_z_mapping(p: GenerationParams):
         return x_pts[s_idx], y_pts[s_idx], deboss_floor, deboss_surface
     else:
         if p.color_mode == 4:
-            midpoint = (l2_target + l1_target) / 2.0
-            x_pts = [0, p.black_clip, midpoint, p.white_clip - 1, p.white_clip, 255]
+            x_pts = [0, p.black_clip, l2_target, l1_target, p.white_clip, 255]
             y_pts = [p.max_h, p.max_h, L2_Z, L1_Z, p.base_h, p.base_h]
         elif p.color_mode == 3:
-            x_pts = [0, p.black_clip, p.white_clip - 1, p.white_clip, 255]
+            x_pts = [0, p.black_clip, l2_target, p.white_clip, 255]
             y_pts = [p.max_h, p.max_h, mid_Z, p.base_h, p.base_h]
         else:  # 2 Colors
             x_pts = [0, p.black_clip, p.white_clip - 1, p.white_clip, 255]
@@ -467,6 +492,22 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
         Z = standard_heightmap(img, p)
         h, w = img.shape
 
+        # Le quote di cambio filamento vengono dalle terrazze che ogni tono
+        # OCCUPA nella mappa Z — non da color_changes_z, che sono le cime delle
+        # terrazze (un cambio in cima colora un layer solo). Si calcolano dai
+        # toni attesi e non dalle quote presenti nella heightmap: se un tono
+        # non ha pixel la sua terrazza manca, e derivando dalle quote presenti
+        # i cambi scalerebbero di posto — la bobina 3 finirebbe sull'inchiostro.
+        # Cosi' ogni bobina resta la sua; una terrazza vuota colora nulla.
+        tone_levels = sorted(set(
+            float(v) for v in np.round(
+                standard_heightmap(np.array(tone_targets(p), dtype=np.uint8), p), 3)))
+        export_changes_z = standard_switch_z(tone_levels, p.layer_height)
+        # Il ri-snap dopo la decimazione invece usa le quote davvero presenti
+        # (altrimenti le pareti si inclinano: vertici a 0,983 e 1,004 attorno
+        # a una base a 1,0 in un job a 4 colori).
+        standard_levels = sorted(float(v) for v in np.unique(np.round(Z, 3)))
+
         # --- 3. Grid & Geometry ---
         if w >= h:
             dim_x = float(max_dim)
@@ -495,7 +536,12 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
     check_cancel()
     if p.smart_decimate and len(mesh.faces) > DECIMATE_THRESHOLD:
         emit(92, "Optimizing Mesh (Decimation)...")
-        allowed_z = ([0.0] + topo_z_heights) if (is_topo and topo_colors) else None
+        if is_topo and topo_colors:
+            allowed_z = [0.0] + topo_z_heights
+        elif not p.is_deckbox_mode:
+            allowed_z = [0.0] + standard_levels
+        else:
+            allowed_z = None      # la scatola ha le sue quote: non si tocca
         mesh = _decimate(mesh, allowed_z=allowed_z)
 
     check_cancel()
@@ -536,7 +582,7 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
 
             if p.output_path_3mf:
                 result.mf3_path = os.path.join(out_dir, f"full_deckbox_{p.source_image_name}.3mf")
-                export_3mf(full_mesh, result.mf3_path, p.color_changes_z)
+                export_3mf(full_mesh, result.mf3_path, export_changes_z)
             if p.output_path:
                 result.stl_path = os.path.join(stl_dir, f"full_deckbox_{p.source_image_name}.stl")
                 full_mesh.export(result.stl_path)

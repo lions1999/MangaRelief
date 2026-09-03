@@ -181,6 +181,25 @@ def compute_topo_switch_z(z_heights: list, layer_height: float) -> list:
     return [round(z_heights[i - 1] + layer_height, 3) for i in range(1, len(z_heights))]
 
 
+def standard_switch_z(levels: list, layer_height: float) -> list:
+    """Quote dei cambi filamento per la modalita' Standard, dalle terrazze REALI.
+
+    `levels` sono le quote distinte della heightmap prodotta (carta in fondo,
+    inchiostro in cima). Stessa regola del topo: il colore i entra al primo
+    layer sopra la terrazza i-1. In piu' la terrazza viene prima portata al
+    layer che lo slicer stampera' davvero (campiona a meta' layer, quindi
+    round), cosi' una quota come 1,512 conta come 1,6 e non come 1,4.
+
+    Prima di questa funzione la Standard esportava le quote *in cima* a ogni
+    terrazza: a 2 colori il nero entrava a 2,40 e copriva solo l'ultimo layer
+    di una colonna alta 1,40 — il 14% della parete — e ogni forma nera usciva
+    con un bordo bianco tutt'intorno.
+    """
+    lh = float(layer_height)
+    snapped = [round(round(float(z) / lh) * lh, 3) for z in levels]
+    return [round(snapped[i - 1] + lh, 3) for i in range(1, len(snapped))]
+
+
 def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
                       base_z: float = 1.0, total_z: float = 2.4,
                       max_dim: float = 100.0, layer_height: float = 0.2,

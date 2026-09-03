@@ -870,9 +870,23 @@ class Manga3DAppController(MainWindowUI):
             return lines
 
         mode = getattr(self, 'color_mode_state', 4)
-        z1   = self.spin_z1.value()
-        z2   = self.spin_z2.value()
-        z3   = self.spin_z3.value()
+        # Le quote da mostrare sono quelle scritte nel 3MF, calcolate
+        # dall'engine sulle terrazze reali della mesh: non gli spinbox, che
+        # sono le CIME delle terrazze (un cambio li' colora un layer solo).
+        real = getattr(getattr(self, 'worker', None), 'result', None)
+        real_z = list(getattr(real, 'color_changes_z', []) or [])
+        n_switch = {2: 1, 3: 2}.get(mode, 3)
+        if len(real_z) >= n_switch:
+            if mode == 4:
+                z1, z2, z3 = real_z[0], real_z[1], real_z[2]
+            elif mode == 3:
+                z1, z2, z3 = 0.0, real_z[0], real_z[1]
+            else:
+                z1, z2, z3 = 0.0, 0.0, real_z[0]
+        else:
+            z1   = self.spin_z1.value()
+            z2   = self.spin_z2.value()
+            z3   = self.spin_z3.value()
         if mode == 4:
             return (
                 f"  \u2022 L1 Light Gray  \u2192  Z = {z1} mm  (Filament 2)\n"

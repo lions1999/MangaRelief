@@ -25,6 +25,7 @@ class MeshWorker(QThread):
         self.params = params
         self.image = image
         self.cancel_requested = False
+        self.result = None
 
     @staticmethod
     def companion_path_for(plate_path: str) -> str:
@@ -41,6 +42,7 @@ class MeshWorker(QThread):
             )
 
             gc.collect()
+            self.result = result   # la UI legge da qui le quote di cambio REALI
             print(f"[Profiling] TOTAL REFACTORED TIME: {result.elapsed_s:.2f}s")
 
             if self.params.is_deckbox_mode:
