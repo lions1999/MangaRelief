@@ -66,18 +66,18 @@ def _as_gray(img):
     return img
 
 
-def _prepare_image_data(img, p: GenerationParams):
-    """Optimizes resolution and applies Gaussian blur/Snap filters."""
+def posterize_tones(img, p: GenerationParams):
+    """Riduce il grigio ai soli livelli che la modalità stampa davvero.
+
+    È il passo che decide su quale bobina finisce ogni pixel, e a 2 colori è
+    *tutta* la modalità. Pubblica perché serve anche a chi vuole mostrare la
+    classificazione senza generare la mesh: un'anteprima che salta questo
+    passaggio mostra un'altra cosa — con due colori, una insensibile all'unico
+    controllo che esiste.
+
+    Niente ridimensionamento qui: chi chiama sceglie a che risoluzione lavorare.
+    """
     img = _as_gray(img)
-    h, w = img.shape
-    target_res = int(p.max_dim / 0.05)
-    target_res = min(target_res, p.max_res_cap)
-
-    if max(w, h) != target_res:
-        scale_res = target_res / max(w, h)
-        new_w, new_h = int(w * scale_res), int(h * scale_res)
-        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-
     img = cv2.GaussianBlur(img, (5, 5), 0)
 
     if p.color_mode == 2:
@@ -95,6 +95,25 @@ def _prepare_image_data(img, p: GenerationParams):
         idx = np.abs(img[..., np.newaxis] - targets).argmin(axis=-1)
         img = targets[idx].astype(np.uint8)
     return img
+
+
+def prepare_source_image(img, p: GenerationParams):
+    """Porta l'immagine alla risoluzione della mesh e la posterizza.
+
+    Pubblica insieme a standard_heightmap perché le due, in quest'ordine,
+    *sono* la classificazione: chi vuole mostrarla senza costruire la mesh deve
+    passare di qui, non ricostruirsela.
+    """
+    img = _as_gray(img)
+    h, w = img.shape
+    target_res = min(int(p.max_dim / 0.05), p.max_res_cap)
+
+    if max(w, h) != target_res:
+        scale_res = target_res / max(w, h)
+        new_w, new_h = int(w * scale_res), int(h * scale_res)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+
+    return posterize_tones(img, p)
 
 
 def _get_z_mapping(p: GenerationParams):
@@ -396,7 +415,7 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
     else:
         # --- 1. Image Preparation ---
         emit(5, "Optimizing resolution for 3D mesh...")
-        img = _prepare_image_data(img_work, p)
+        img = prepare_source_image(img_work, p)
         check_cancel()
 
         # --- 2. Z-Mapping & Heightmap ---
