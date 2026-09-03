@@ -104,6 +104,14 @@ def _get_z_mapping(p: GenerationParams):
     l1_target = p.sampled_values[1]
     l2_target = p.sampled_values[2]
 
+    # A 3 colori il selettore nasconde L1 e lascia in gioco L2 (vedi
+    # _compute_auto_z / manga_to_3d._refresh_color_mode): l'unico livello
+    # intermedio e' color_changes_z[1], mentre [0] vale 0.0 per convenzione
+    # ("layer non usato"). Leggendo [0] il midtone finiva a quota 0 — sotto la
+    # base — cosi' la fascia di mezzo restava senza un solo pixel e la seconda
+    # bobina non colorava nulla.
+    mid_Z = L2_Z if p.color_mode == 3 else L1_Z
+
     if p.is_deckbox_mode:
         deboss_depth = DeckboxConfig.DEBOSS_DEPTH
         base_thickness = DeckboxConfig.BASE_THICKNESS
@@ -116,9 +124,12 @@ def _get_z_mapping(p: GenerationParams):
         L1_ratio = (L1_Z - p.base_h) / relief_range if relief_range > 0 else 0.33
         L2_ratio = (L2_Z - p.base_h) / relief_range if relief_range > 0 else 0.66
 
+        mid_ratio = L2_ratio if p.color_mode == 3 else L1_ratio
+
         # I layer Z scalano da deboss_floor (fondo scavo) a deboss_surface (superficie muro)
         L1_deboss = deboss_floor + L1_ratio * deboss_depth
         L2_deboss = deboss_floor + L2_ratio * deboss_depth
+        mid_deboss = deboss_floor + mid_ratio * deboss_depth
 
         if p.color_mode == 4:
             midpoint = (l2_target + l1_target) / 2.0
@@ -126,7 +137,7 @@ def _get_z_mapping(p: GenerationParams):
             y_pts = [deboss_surface, deboss_surface, L2_deboss, L1_deboss, deboss_floor, deboss_floor]
         elif p.color_mode == 3:
             x_pts = [0, p.black_clip, p.white_clip - 1, p.white_clip, 255]
-            y_pts = [deboss_surface, deboss_surface, L1_deboss, deboss_floor, deboss_floor]
+            y_pts = [deboss_surface, deboss_surface, mid_deboss, deboss_floor, deboss_floor]
         else:  # 2 Colors
             x_pts = [0, p.black_clip, p.white_clip - 1, p.white_clip, 255]
             y_pts = [deboss_surface, deboss_surface, deboss_surface, deboss_floor, deboss_floor]
@@ -141,7 +152,7 @@ def _get_z_mapping(p: GenerationParams):
             y_pts = [p.max_h, p.max_h, L2_Z, L1_Z, p.base_h, p.base_h]
         elif p.color_mode == 3:
             x_pts = [0, p.black_clip, p.white_clip - 1, p.white_clip, 255]
-            y_pts = [p.max_h, p.max_h, L1_Z, p.base_h, p.base_h]
+            y_pts = [p.max_h, p.max_h, mid_Z, p.base_h, p.base_h]
         else:  # 2 Colors
             x_pts = [0, p.black_clip, p.white_clip - 1, p.white_clip, 255]
             y_pts = [p.max_h, p.max_h, p.max_h, p.base_h, p.base_h]
