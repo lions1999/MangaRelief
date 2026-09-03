@@ -11,6 +11,33 @@ from .config import SPOT_BASE_RGB, SPOT_TOP_RGB
 # a/b, un pixel senza tinta non può mai finire su un cluster saturo.
 CHROMA_MATCH_WEIGHT = 2.5
 
+
+# ---------------------------------------------------------------------------
+# K-Means di OpenCV, ma riproducibile
+# ---------------------------------------------------------------------------
+
+KMEANS_SEED = 42
+
+
+def stable_kmeans(data: np.ndarray, k: int, attempts: int, flags):
+    """cv2.kmeans con inizializzazione riproducibile.
+
+    OpenCV pesca i centri iniziali dal proprio RNG globale, che avanza a ogni
+    chiamata: dentro un processo di lunga durata la *stessa* immagine produce
+    quindi terrazze diverse a ogni richiesta — misurato, non teorico. Sul
+    desktop si notava poco (la prima generazione dopo l'avvio era sempre
+    uguale), su un server è un risultato che cambia sotto i piedi dell'utente,
+    e fa divergere l'anteprima dalla mesh finale.
+
+    Il seme è globale per cv2, ma nel motore nessun'altra cosa dipende da quel
+    RNG, quindi fissarlo qui non ha altri effetti.
+    """
+    cv2.setRNGSeed(KMEANS_SEED)
+    return cv2.kmeans(data, k, None,
+                      (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0),
+                      attempts, flags)
+
+
 def rgb_to_lab(rgb_array: np.ndarray, chroma_weight: float = 1.0) -> np.ndarray:
     """Converte un array RGB uint8 (HxWx3 oppure Nx3) nello spazio Lab di OpenCV.
     Le distanze in Lab rispecchiano la percezione umana, a differenza dell'RGB.
@@ -97,10 +124,9 @@ def suggest_midtones(image):
     small_img = cv2.resize(image, (256, 256))
     data = np.float32(small_img.flatten())
     
-    # Define criteria and apply kmeans
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-    K = 4
-    _, _, centers = cv2.kmeans(data, K, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+    # Inizializzazione seminata: senza, la stessa immagine dà midtoni diversi
+    # a chiamate successive nello stesso processo (vedi stable_kmeans).
+    _, _, centers = stable_kmeans(data, 4, 10, cv2.KMEANS_PP_CENTERS)
     
     # Sort centers from darkest to lightest
     centers = np.sort(centers.flatten())
@@ -269,7 +295,7 @@ def tonal_landmarks(gray_pixels: np.ndarray) -> np.ndarray:
     flat = np.asarray(gray_pixels).reshape(-1, 1).astype(np.float32)
     if flat.shape[0] >= 500:
         crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 15, 1.0)
-        _, _, centers = cv2.kmeans(flat, 4, None, crit, 8, cv2.KMEANS_PP_CENTERS)
+        _, _, centers = stable_kmeans(flat, 4, 8, cv2.KMEANS_PP_CENTERS)
         return np.sort(centers.flatten())[::-1]
     return np.array([220.0, 165.0, 90.0, 35.0], dtype=np.float32)
 
