@@ -292,7 +292,43 @@ class MainWindowUI(QMainWindow):
             btn.setProperty("class", "swatch")
             swatch_layout.addWidget(btn)
             self.swatches.append(btn)
-            
+
+        # --- 2 colori: non c'e' un tono da campionare, c'e' una soglia ---
+        # A due colori L1 e L2 non esistono e l'immagine decide da sola cosa e'
+        # inchiostro: gli swatch restano quattro pulsanti di cui meta' non fa
+        # niente. Al loro posto compare l'unica domanda che resta, cioe' quanto
+        # carica debba essere una zona sfumata perche' stampi nera.
+        # Nascosti finche' la modalita' non diventa 2: li accende
+        # _refresh_color_mode, che e' gia' il punto in cui il pannello cambia
+        # forma con la modalita'.
+        self.lbl_bw_coverage = QLabel("Shading darker than 35% prints as ink")
+        self.lbl_bw_coverage.setWordWrap(True)
+        self.lbl_bw_coverage.setVisible(False)
+        swatch_layout.addWidget(self.lbl_bw_coverage)
+
+        self.slider_bw_coverage = QSlider(Qt.Orientation.Horizontal)
+        self.slider_bw_coverage.setRange(10, 90)
+        self.slider_bw_coverage.setSingleStep(5)
+        self.slider_bw_coverage.setPageStep(5)
+        self.slider_bw_coverage.setValue(35)
+        self.slider_bw_coverage.setVisible(False)
+        swatch_layout.addWidget(self.slider_bw_coverage)
+
+        self.lbl_bw_note = QLabel("")
+        self.lbl_bw_note.setObjectName("lbl_bw_note")
+        self.lbl_bw_note.setWordWrap(True)
+        self.lbl_bw_note.setVisible(False)
+        swatch_layout.addWidget(self.lbl_bw_note)
+
+        # L'anteprima vale per tutte le sotto-modalita' Standard, non solo a
+        # due colori: dice su quale bobina finisce ogni pixel, che e' la
+        # domanda a cui a 3 e 4 colori servono gli swatch. Senza, la copertura
+        # sarebbe un cursore cieco — muovi, generi, guardi, ripeti.
+        self.btn_std_mockup = QPushButton("👁 Mockup Preview")
+        self.btn_std_mockup.setCheckable(True)
+        self.btn_std_mockup.setEnabled(False)
+        swatch_layout.addWidget(self.btn_std_mockup)
+
         self.group_swatch.setLayout(swatch_layout)
         right_layout.addWidget(self.group_swatch)
         
@@ -441,6 +477,7 @@ class MainWindowUI(QMainWindow):
             self.combo_spot_naccents, self.btn_spot_auto, *self.spot_swatches,
             self.slider_spot_coverage, self.btn_spot_mockup,
             self.chk_auto_midtones, *self.swatches,
+            self.slider_bw_coverage, self.btn_std_mockup,
             self.spin_dim, self.spin_base, self.spin_maxh, self.spin_layer_height,
             self.cmb_quality, self.chk_smart_decimate,
             self.spin_white_clip, self.btn_auto_white, self.spin_black_clip,

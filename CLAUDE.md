@@ -31,6 +31,20 @@ Qt widget tests must run with `QT_QPA_PLATFORM=offscreen` and **must call `win.s
 
 ## Architecture
 
+- **Standard a 2 colori** — il pannello "Color Picking" diventa "Ink Coverage":
+  gli swatch spariscono (L1/L2 non esistono, e quattro pulsanti di cui meta'
+  inerti sono peggio di nessun pulsante) e al loro posto c'e' il cursore della
+  copertura, che finisce in `GenerationParams.bw_coverage`. Lo scambio lo fa
+  `_refresh_color_mode`, che e' gia' il punto in cui il pannello cambia forma
+  con la modalita'; fuori dai 2 colori `_current_bw_coverage()` restituisce
+  `None`, che nel motore e' la strada di sempre.
+- **`btn_std_mockup`** — l'anteprima della classificazione Standard, gemella di
+  quella Spot: stesso schema (pulsante bistabile, timer da 180 ms, `setImage`
+  sul viewer). Esegue `prepare_source_image` + `standard_heightmap` e dipinge
+  ogni pixel col tono campionato della sua banda — *non* posterizza e basta,
+  perche' la banda dipende da `color_changes_z`, che con l'auto-Z spento e'
+  scritto a mano. Senza anteprima il cursore della copertura sarebbe cieco.
+
 - **`manga_to_3d.py`** — `Manga3DAppController(MainWindowUI)`. All UI event wiring, image loading, per-mode state (Spot accents, Cover composition/zoom/offset), and the export-success popup text (`_build_color_change_instructions`) live here. Generation itself is delegated to `MeshWorker`.
 - **`ui_main_window.py`** — pure UI construction (`MainWindowUI`) + `ImageGraphicsView` (wheel-zoom/pan/`pixelClicked` signal). `_on_mode_changed` toggles per-mode group visibility. `self.lockable_widgets` is a flat registry of every widget that must disable during generation — **add new controls to this list, not to `toggle_ui_state`**, which just iterates the registry and restores mode-conditional states (auto-Z, auto-midtones, Deckbox-locked physical params, Cover levels selector) afterward.
 - **`engine/`** — the whole generation pipeline, **importable without PyQt** (so the same code can serve a web backend). Nothing under `engine/` may import PyQt or touch the filesystem outside `engine.resources`.

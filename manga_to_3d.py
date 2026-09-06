@@ -14,7 +14,8 @@ from PyQt6.QtCore import Qt, QTimer
 
 from utils import resource_path
 from ui_main_window import MainWindowUI
-from engine import GenerationMode, GenerationParams
+from engine import (GenerationMode, GenerationParams, ink_level,
+                    prepare_source_image, standard_heightmap)
 from engine.color_utils import (extract_dominant_colors, suggest_midtones,
                          suggest_spot_accents, classify_spot_pixels,
                          downsample_for_analysis, build_spot_palette,
@@ -46,6 +47,7 @@ class Manga3DAppController(MainWindowUI):
         super().__init__()
         
         self.img_filtered_array = None
+        self._ink_level = None
         self.active_swatch_index = None
         self.loaded_image_path = None
         self.last_opened_dir = ""
@@ -110,6 +112,19 @@ class Manga3DAppController(MainWindowUI):
         self.spin_black_clip.valueChanged.connect(lambda _: self._refresh_spot_mockup())
         self.cmb_quality.currentIndexChanged.connect(lambda _: self._refresh_spot_mockup())
         self.btn_spot_mockup.toggled.connect(self._on_spot_mockup_toggled)
+
+        # Standard: la copertura e l'anteprima della classificazione. Le stesse
+        # cose che tengono vivo il mockup Spot lo tengono vivo anche qui —
+        # ritaglio, qualita' e quote di cambio colore cambiano su quale bobina
+        # finisce un pixel, quindi cambiano l'immagine che si sta guardando.
+        self.slider_bw_coverage.valueChanged.connect(self._on_bw_coverage_changed)
+        self.btn_std_mockup.toggled.connect(self._on_std_mockup_toggled)
+        self.spin_white_clip.valueChanged.connect(lambda _: self._refresh_std_mockup())
+        self.spin_black_clip.valueChanged.connect(lambda _: self._refresh_std_mockup())
+        self.cmb_quality.currentIndexChanged.connect(lambda _: self._refresh_std_mockup())
+        self.chk_auto_z.toggled.connect(lambda _: self._refresh_std_mockup())
+        for _sp in (self.spin_z1, self.spin_z2, self.spin_z3):
+            _sp.valueChanged.connect(lambda _: self._refresh_std_mockup())
 
     def _update_viewport_mode(self, index):
         """Switch viewport display between Color and Grayscale based on selected mode."""
@@ -332,6 +347,123 @@ class Manga3DAppController(MainWindowUI):
         names = ", ".join(f"RGB{p}" for p in palette)
         self.lbl_status.setText(f"👁 Mockup: {len(palette)} colors → {names}")
 
+    # ------------------------------------------------------------------
+    # STANDARD — copertura a 2 colori e anteprima della classificazione
+
+    def _refresh_bw_labels(self):
+        """Il valore del cursore e cosa conta come inchiostro su *questa*
+        immagine: la soglia la legge Otsu dall'istogramma, quindi cambia da
+        scansione a scansione e dirla a voce e' l'unico modo perche' il
+        cursore non sia un numero senza unita'."""
+        pct = self.slider_bw_coverage.value()
+        self.lbl_bw_coverage.setText(f"Shading darker than {pct}% prints as ink")
+        nota = ("A zone prints as ink when at least "
+                f"{pct}% of its area is inked, judged over about 0.7 mm — "
+                "what the nozzle can resolve. Lower keeps more hatching black, "
+                "higher keeps more of it paper.")
+        if getattr(self, 'img_filtered_array', None) is not None:
+            if getattr(self, '_ink_level', None) is None:
+                self._ink_level = ink_level(self.img_filtered_array)
+            nota += f" Ink here is anything darker than {self._ink_level}."
+        self.lbl_bw_note.setText(nota)
+
+    def _on_bw_coverage_changed(self, _value):
+        self._refresh_bw_labels()
+        self._refresh_std_mockup()
+
+    def _preview_params(self):
+        """I parametri correnti, senza percorsi di uscita: l'anteprima deve
+        classificare esattamente come classifichera' la generazione."""
+        if self.chk_auto_z.isChecked():
+            changes = self._compute_auto_z()
+        else:
+            changes = [round(self.spin_z1.value(), 3),
+                       round(self.spin_z2.value(), 3),
+                       round(self.spin_z3.value(), 3)]
+        mode = getattr(self, 'color_mode_state', 4)
+        return GenerationParams(
+            mode=GenerationMode.STANDARD,
+            max_dim=self.spin_dim.value(),
+            base_h=self.spin_base.value(),
+            max_h=self.spin_maxh.value(),
+            layer_height=self.spin_layer_height.value(),
+            max_res_cap=self._current_max_res_cap(),
+            white_clip=self.spin_white_clip.value(),
+            black_clip=self.spin_black_clip.value(),
+            sampled_values=self.sampled_colors,
+            color_mode=mode,
+            color_changes_z=changes,
+            bw_coverage=self._current_bw_coverage(),
+        )
+
+    def _current_bw_coverage(self):
+        """La copertura vale solo a 2 colori; altrove None lascia al motore la
+        strada di sempre."""
+        if getattr(self, 'color_mode_state', 4) != 2:
+            return None
+        return self.slider_bw_coverage.value() / 100.0
+
+    def _on_std_mockup_toggled(self, checked):
+        if checked and getattr(self, 'img_filtered_array', None) is None:
+            self.btn_std_mockup.setChecked(False)
+            return
+        if checked:
+            self._do_refresh_std_mockup()
+            self.btn_std_mockup.setText("👁 Back to Original")
+        else:
+            self.btn_std_mockup.setText("👁 Mockup Preview")
+            self._update_viewport_mode(self.mode_selector.currentIndex())
+
+    def _refresh_std_mockup(self):
+        """Come per Spot: le richieste ravvicinate si accorpano, perche' alla
+        risoluzione di generazione un ricalcolo costa centinaia di ms e
+        trascinare un cursore ne genererebbe decine."""
+        if not self.btn_std_mockup.isChecked():
+            return
+        if getattr(self, '_std_mockup_timer', None) is None:
+            self._std_mockup_timer = QTimer(self)
+            self._std_mockup_timer.setSingleShot(True)
+            self._std_mockup_timer.timeout.connect(self._do_refresh_std_mockup)
+        self._std_mockup_timer.start(180)
+
+    def _do_refresh_std_mockup(self):
+        """Dipinge ogni pixel col tono in cui stampera' davvero.
+
+        Esegue gli stessi due passi del motore, sullo stesso ingresso, alla
+        stessa risoluzione: la posterizzazione e' cio' che assegna un pixel a
+        una bobina, e un'anteprima che la salti mostra un'altra immagine — a
+        due colori, una insensibile all'unico controllo che esiste.
+
+        La banda di un pixel e' quanti cambi di colore stanno alla sua altezza
+        o sotto: un pixel stampa nel colore caricato quando si raggiunge la sua
+        superficie. Contano tutti, l'ultimo compreso.
+        """
+        if not self.btn_std_mockup.isChecked():
+            return
+        if getattr(self, 'img_filtered_array', None) is None:
+            return
+
+        p = self._preview_params()
+        z = standard_heightmap(prepare_source_image(self.img_filtered_array, p), p)
+
+        if p.color_mode == 2:
+            toni = [p.sampled_values[0], p.sampled_values[3]]
+        elif p.color_mode == 3:
+            toni = [p.sampled_values[0], p.sampled_values[2], p.sampled_values[3]]
+        else:
+            toni = list(p.sampled_values)
+
+        banda = np.zeros(z.shape, dtype=np.int32)
+        for c in (c for c in p.color_changes_z if c > 0):
+            banda += (z >= c - 1e-9).astype(np.int32)
+        dipinta = np.array(toni, dtype=np.uint8)[np.clip(banda, 0, len(toni) - 1)]
+
+        self.std_preview_array = cv2.cvtColor(dipinta, cv2.COLOR_GRAY2RGB)
+        self.viewer.setImage(self.std_preview_array)
+        self.lbl_status.setText(
+            f"👁 Mockup: {p.color_mode}-color classification at "
+            f"{max(dipinta.shape)}px")
+
     def _get_rgb_filtered(self):
         """Filtro bilaterale RGB calcolato lazy alla prima richiesta (serve solo all'anteprima Topo)."""
         if getattr(self, 'img_rgb_filtered', None) is None:
@@ -371,6 +503,23 @@ class Manga3DAppController(MainWindowUI):
         else:
             self.color_mode_state = 2
             self.lbl_color_mode.setText("⚫ 2-Color Mode (B&W)\nL1/L2 hidden. L3 low and thick.")
+
+        # A 2 colori il pannello di campionamento diventa un'altra cosa: non
+        # c'e' un tono da scegliere, c'e' una soglia. Gli swatch resterebbero
+        # quattro pulsanti di cui meta' non fa niente, ed e' meglio non
+        # mostrarli che mostrarli inerti.
+        due = (self.color_mode_state == 2)
+        self.group_swatch.setTitle("Ink Coverage (2-Color Mode)" if due
+                                   else "Color Picking (Click to calibrate)")
+        self.chk_auto_midtones.setVisible(not due)
+        self.lbl_swatch_info.setVisible(not due)
+        for _sw in self.swatches:
+            _sw.setVisible(not due)
+        self.lbl_bw_coverage.setVisible(due)
+        self.slider_bw_coverage.setVisible(due)
+        self.lbl_bw_note.setVisible(due)
+        if due:
+            self._refresh_bw_labels()
 
         # Update visibility for Z Heights
         self.lbl_z1.setVisible(self.color_mode_state == 4)
@@ -498,6 +647,11 @@ class Manga3DAppController(MainWindowUI):
         # Display correct version based on mode (spegne anche eventuali anteprime attive)
         self.btn_spot_mockup.setChecked(False)
         self.btn_spot_mockup.setEnabled(True)
+        self.btn_std_mockup.setChecked(False)
+        self.btn_std_mockup.setEnabled(True)
+        # La soglia dell'inchiostro si rilegge dall'istogramma della nuova
+        # immagine: e' un valore di quella scansione, non del programma.
+        self._ink_level = None
         self.btn_cover_preview.setChecked(False)
         self.btn_cover_preview.setEnabled(True)
         self._update_viewport_mode(self.mode_selector.currentIndex())
@@ -739,6 +893,7 @@ class Manga3DAppController(MainWindowUI):
             sampled_values=self.sampled_colors,
             color_mode=getattr(self, 'color_mode_state', 4),
             color_changes_z=color_changes_z,
+            bw_coverage=self._current_bw_coverage(),
             topo_colors=topo_colors,
             spot_accents=self._get_spot_accents(),
             spot_coverage=self.slider_spot_coverage.value(),
@@ -779,6 +934,7 @@ class Manga3DAppController(MainWindowUI):
             for btn in self.swatches:
                 btn.setEnabled(not self.chk_auto_midtones.isChecked())
             self.btn_spot_mockup.setEnabled(self.img_filtered_array is not None)
+            self.btn_std_mockup.setEnabled(self.img_filtered_array is not None)
             self.btn_cover_preview.setEnabled(self.img_filtered_array is not None)
             # In Deckbox i parametri fisici restano bloccati anche dopo l'unlock
             self._on_mode_changed(self.mode_selector.currentIndex())
