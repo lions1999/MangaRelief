@@ -22,15 +22,25 @@ MangaRelief Pro is a PyQt6 desktop app that quantizes manga grayscale (or full-c
 pip install -r requirements.txt   # scipy/sklearn/fast-simplification/shapely/manifold3d/mapbox-earcut all required
 python manga_to_3d.py             # run the app (GUI — needs a display)
 python test_topo_colors.py <image>  # manual smoke test of K-Means posterize + STL export, no GUI
+python tests/copertura_2colori.py   # coverage slider + Standard mockup, engine and Qt (~2 min, no display needed)
 build_exe.bat                     # Windows PyInstaller build (hidden-imports kept in sync with requirements.txt)
 ```
 
-No automated test suite or linter exists. When validating changes in this repo, write throwaway pytest-less scripts (`python - <<'EOF' ... EOF`) that exercise `engine.generate()` end-to-end (and `MeshWorker` when the Qt plumbing itself is what changed) and assert on the resulting mesh (watertight, `Z` quantile set, face count) — that is the pattern used throughout this branch's commit history and catches the geometry regressions that matter (winding, terrace snapping, mask holes).
+No linter and no pytest. Checks are plain scripts that print `PASS`/`FAIL` and exit non-zero: they exercise `engine.generate()` end-to-end (and `MeshWorker` when the Qt plumbing itself is what changed) and assert on the resulting mesh — watertight, `Z` quantile set, face count. That is the pattern throughout this branch's history, and it catches the geometry regressions that matter (winding, terrace snapping, mask holes).
+
+**`tests/` holds the ones worth keeping**; write a throwaway (`python - <<'EOF' ... EOF`) for a one-off, and move it into `tests/` the moment it covers something that could plausibly break again. The criterion is not size, it is whether re-running it in six months would tell you anything.
+
+Three ways these assertions go wrong, each of which has happened here:
+
+- **Measuring a proxy instead of the thing.** Counting vertices at the top Z is not the printed ink area: decimation crowds vertices where geometry is complicated, which is the opposite of area. Sum `area_faces` over the faces that lie at that Z.
+- **Expecting the wrong shape.** A 2-colour relief has *three* Z values — the flat bottom at 0, the base, and the ink — not two.
+- **A fixture that cannot tell the settings apart.** A test panel with one hatch density classifies the same at 25% and 70% coverage, so the check passes without checking anything. Build the fixture so the setting under test actually changes the answer.
 
 Qt widget tests must run with `QT_QPA_PLATFORM=offscreen` and **must call `win.show()`** before asserting `isVisible()` — without a shown top-level window, Qt reports every child widget as not visible regardless of `setVisible(True)`, which produced a false failure earlier in this branch's history.
 
 ## Architecture
 
+- **`manga_to_3d.py`** — `Manga3DAppController(MainWindowUI)`. All UI event wiring, image loading, per-mode state (Spot accents, Cover composition/zoom/offset), and the export-success popup text (`_build_color_change_instructions`) live here. Generation itself is delegated to `MeshWorker`.
 - **Standard a 2 colori** — il pannello "Color Picking" diventa "Ink Coverage":
   gli swatch spariscono (L1/L2 non esistono, e quattro pulsanti di cui meta'
   inerti sono peggio di nessun pulsante) e al loro posto c'e' il cursore della
@@ -45,7 +55,6 @@ Qt widget tests must run with `QT_QPA_PLATFORM=offscreen` and **must call `win.s
   perche' la banda dipende da `color_changes_z`, che con l'auto-Z spento e'
   scritto a mano. Senza anteprima il cursore della copertura sarebbe cieco.
 
-- **`manga_to_3d.py`** — `Manga3DAppController(MainWindowUI)`. All UI event wiring, image loading, per-mode state (Spot accents, Cover composition/zoom/offset), and the export-success popup text (`_build_color_change_instructions`) live here. Generation itself is delegated to `MeshWorker`.
 - **`ui_main_window.py`** — pure UI construction (`MainWindowUI`) + `ImageGraphicsView` (wheel-zoom/pan/`pixelClicked` signal). `_on_mode_changed` toggles per-mode group visibility. `self.lockable_widgets` is a flat registry of every widget that must disable during generation — **add new controls to this list, not to `toggle_ui_state`**, which just iterates the registry and restores mode-conditional states (auto-Z, auto-midtones, Deckbox-locked physical params, Cover levels selector) afterward.
 - **`engine/`** — the whole generation pipeline, **importable without PyQt** (so the same code can serve a web backend). Nothing under `engine/` may import PyQt or touch the filesystem outside `engine.resources`.
   - `engine/pipeline.py` — `generate(image, params, progress=None, should_cancel=None) -> GenerationResult`. One function branches by mode: prepares/composes the source image → classifies pixels into a palette → builds the heightmap/terrace mesh → optional decimation (`fast_simplification`, >`DECIMATE_THRESHOLD` = 200k faces) → export. `progress(pct, msg)` and `should_cancel()` are plain callables; errors propagate as exceptions (the caller decides how to present them).
