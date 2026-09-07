@@ -130,7 +130,7 @@ from engine import GenerationMode, GenerationParams, generate
 
 def genera(nome, **kw):
     p = GenerationParams(
-        mode=kw.pop("mode", GenerationMode.SPOT_COLOR),
+        mode=kw.pop("mode", GenerationMode.KEYCHAIN),
         max_dim=60.0, base_h=1.0, max_h=2.4, layer_height=0.2,
         max_res_cap=800, smart_decimate=kw.pop("smart_decimate", False),
         spot_accents=[], output_path=os.path.join(TMP, nome + ".stl"), **kw)
@@ -143,21 +143,21 @@ def genere(mesh):
     return (2 - mesh.euler_number) // 2
 
 
-m0, _ = genera("piena")
-check("senza ritaglio: lastra chiusa senza fori",
+m0, _ = genera("piena", mode=GenerationMode.SPOT_COLOR)
+check("Spot Color (senza ritaglio): lastra chiusa senza fori",
       m0.is_watertight and genere(m0) == 0, f"chi={m0.euler_number}")
 
-m1, r1 = genera("auto", cutout_enabled=True)
+m1, r1 = genera("auto")
 check("ritaglio auto: chiusa, un pezzo, ancora senza fori",
       m1.is_watertight and m1.body_count == 1 and genere(m1) == 0,
       f"chi={m1.euler_number} corpi={m1.body_count}")
 
-m2, r2 = genera("click", cutout_enabled=True, cutout_cut_seeds=[P_VUOTO])
+m2, r2 = genera("click", cutout_cut_seeds=[P_VUOTO])
 check("un click -> un foro passante VERO nella mesh",
       m2.is_watertight and m2.body_count == 1 and genere(m2) == 1,
       f"chi={m2.euler_number}")
 
-m3, r3 = genera("occhiello", cutout_enabled=True, cutout_cut_seeds=[P_VUOTO],
+m3, r3 = genera("occhiello", cutout_cut_seeds=[P_VUOTO],
                 cutout_ring=True, cutout_ring_xy=(450, 45),
                 cutout_ring_d_mm=4.0, cutout_ring_rim_mm=2.5)
 check("occhiello -> secondo foro, e il motore lo dichiara attaccato",
@@ -175,7 +175,7 @@ check("un occhiello fuori dal materiale viene dichiarato staccato",
 # ha pareti proprie e la mesh resta chiusa — cioe' da una proprieta' che una
 # modifica a create_solid_mesh potrebbe togliere senza che nessuno se ne
 # accorga, perche' il file continuerebbe ad aprirsi.
-m_dec, _ = genera("decimata", cutout_enabled=True, cutout_cut_seeds=[P_VUOTO],
+m_dec, _ = genera("decimata", cutout_cut_seeds=[P_VUOTO],
                   cutout_ring=True, cutout_ring_xy=(450, 45),
                   cutout_ring_d_mm=4.0, cutout_ring_rim_mm=2.5,
                   smart_decimate=True)
@@ -183,12 +183,12 @@ check("i fori sopravvivono alla decimazione (fill_holes non li richiude)",
       m_dec.is_watertight and genere(m_dec) == 2 and m_dec.body_count == 1,
       f"chi={m_dec.euler_number} facce={len(m_dec.faces)}")
 
-# Standard lavora in grigio e passa da create_solid_mesh invece che da
-# process_mesh_topo: e' un secondo percorso, e va provato come tale.
-m4, _ = genera("standard", mode=GenerationMode.STANDARD,
-               cutout_enabled=True, cutout_cut_seeds=[P_VUOTO],
+# La finitura B/N passa da create_solid_mesh invece che da process_mesh_topo:
+# e' un secondo percorso dentro la stessa modalita', e va provato come tale.
+m4, _ = genera("bn", keychain_finish_spot=False,
+               cutout_cut_seeds=[P_VUOTO],
                color_mode=2, color_changes_z=[1.4, 2.0, 2.4])
-check("modalita' Standard: stessa sagoma, stesso foro",
+check("finitura B/N: stessa sagoma, stesso foro",
       m4.is_watertight and genere(m4) == 1, f"chi={m4.euler_number}")
 
 
@@ -201,7 +201,7 @@ dipinta = np.full(IMG.shape, 255, np.uint8)
 cv2.circle(dipinta, (450, 400), 370, (255, 216, 0), -1)
 cv2.circle(dipinta, (450, 560), 200, (255, 216, 0), -1)
 cv2.circle(dipinta, (450, 150), 90, (255, 255, 255), -1)   # un vuoto dipinto
-m5, _ = genera("dipinta", cutout_enabled=True, cutout_paint_mask=dipinta)
+m5, _ = genera("dipinta", cutout_paint_mask=dipinta)
 check("maschera dipinta: il vuoto bianco diventa foro senza click",
       m5.is_watertight and genere(m5) == 1, f"chi={m5.euler_number}")
 
@@ -222,9 +222,9 @@ def impronta_mm2(mesh):
 # quella del foglio intero (60x60). Sono due numeri lontani il 27%: nessuna
 # tolleranza li confonde.
 a_piena, a_cut = impronta_mm2(m0), impronta_mm2(m1)
-check("senza ritaglio l'impronta e' il foglio (60x60)",
+check("in Spot Color l'impronta e' il foglio (60x60)",
       abs(a_piena - 3600.0) / 3600.0 < 0.02, f"{a_piena:.0f} mm2")
-check("con ritaglio l'impronta e' il disco, e Max Dim misura il pezzo",
+check("in Keychain l'impronta e' il disco, e Max Dim misura il pezzo",
       abs(a_cut - np.pi * 30.0 ** 2) / (np.pi * 30.0 ** 2) < 0.05,
       f"{a_cut:.0f} mm2 (atteso {np.pi*900:.0f})")
 
@@ -232,9 +232,9 @@ check("con ritaglio l'impronta e' il disco, e Max Dim misura il pezzo",
 # riquadro conta davvero, e senza di quello il pezzo uscirebbe in scala 1:4.
 grande = np.full((1200, 1200, 3), 255, np.uint8)
 cv2.circle(grande, (600, 600), 150, (0, 0, 0), 10)
-p = GenerationParams(mode=GenerationMode.SPOT_COLOR, max_dim=50.0, base_h=1.0,
+p = GenerationParams(mode=GenerationMode.KEYCHAIN, max_dim=50.0, base_h=1.0,
                      max_h=2.4, layer_height=0.2, max_res_cap=800,
-                     smart_decimate=False, spot_accents=[], cutout_enabled=True,
+                     smart_decimate=False, spot_accents=[],
                      output_path=os.path.join(TMP, "piccolo.stl"))
 m6 = trimesh.load(generate(grande, p).stl_path)
 lato = float(max(m6.bounds[1][:2] - m6.bounds[0][:2]))
@@ -253,7 +253,7 @@ check("lo Sticker border allarga la sagoma (in px, a parita' di scala)",
 # Un ritaglio che non lascia niente deve fermarsi con un messaggio, non
 # produrre una mesh vuota che si scopre nello slicer.
 try:
-    genera("vuoto", cutout_enabled=True,
+    genera("vuoto",
            cutout_paint_mask=np.full(IMG.shape, 255, np.uint8))
     check("ritaglio vuoto: errore esplicito", False, "nessuna eccezione")
 except ValueError as e:
@@ -276,26 +276,44 @@ QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: (IMG_PATH, ""))
 win.load_image()
 check("immagine caricata", win.img_rgb_original is not None)
 
+KEYCHAIN = 5
+
 win.mode_selector.setCurrentIndex(3)          # Spot
-check("il pannello ritaglio si vede in Spot", win.group_cutout.isVisible())
-win.mode_selector.setCurrentIndex(2)          # Deckbox
-check("in Deckbox il pannello sparisce (la scatola ha gia' una sagoma)",
-      not win.group_cutout.isVisible())
-win.mode_selector.setCurrentIndex(4)          # Phone Cover
-check("in Phone Cover il pannello sparisce (la plate ha gia' una sagoma)",
-      not win.group_cutout.isVisible())
-win.mode_selector.setCurrentIndex(3)
+check("in Spot il pannello portachiavi non c'e'", not win.group_keychain.isVisible())
+win.mode_selector.setCurrentIndex(KEYCHAIN)
+check("scegliendo Keychain / Cutout compare il suo pannello",
+      win.group_keychain.isVisible())
+check("il selettore ha la voce in fondo, dopo Phone Cover",
+      win.mode_selector.itemText(KEYCHAIN).startswith("Keychain"),
+      win.mode_selector.itemText(KEYCHAIN))
+check("e la modalita' che arriva al motore e' quella giusta",
+      win._current_generation_mode() == GenerationMode.KEYCHAIN)
 
-check("senza la spunta i controlli sono spenti",
-      not win.btn_cutout_edit.isEnabled() and not win.slider_cutout_border.isEnabled())
+# La finitura decide quali altri pannelli servono: in Spot gli accenti, in
+# B/N gli swatch e le quote Standard. Sono gli stessi pannelli della cover,
+# e la regola e' la stessa.
+check("finitura Spot: compare il pannello accenti", win.group_spot.isVisible())
+check("finitura Spot: swatch e quote Standard spariscono",
+      not win.group_swatch.isVisible() and not win.group_z.isVisible())
+win.combo_keychain_finish.setCurrentIndex(1)   # B/N
+check("finitura B/N: tornano swatch e quote Standard",
+      win.group_swatch.isVisible() and win.group_z.isVisible())
+check("finitura B/N: il pannello accenti sparisce", not win.group_spot.isVisible())
+check("...e il motore riceve la finitura scelta", not win._keychain_spot())
+win.combo_keychain_finish.setCurrentIndex(0)
 
-win.chk_cutout.setChecked(True)
-check("con la spunta si accendono", win.btn_cutout_edit.isEnabled()
-      and win.slider_cutout_border.isEnabled())
-check("la spunta accende anche l'anteprima", win.btn_cutout_preview.isChecked())
+# In una modalita' dedicata i controlli sono vivi da subito: non c'e' una
+# spunta da accendere prima, perche' la voce del menu e' gia' quella spunta.
+check("i controlli del ritaglio sono attivi senza altre spunte",
+      win.btn_cutout_edit.isEnabled() and win.slider_cutout_border.isEnabled()
+      and win.btn_cutout_preview.isEnabled())
+
+# Un portachiavi da 200 mm sarebbe un sottopentola.
+check("entrando in modalita' Max Dim scende a taglia portachiavi",
+      win.spin_dim.value() <= 80.0, f"{win.spin_dim.value()} mm")
 
 win.btn_cutout_edit.setChecked(True)
-check("entrando in modifica l'anteprima resta accesa (i click si leggono li')",
+check("entrando in modifica l'anteprima si accende (i click si leggono li')",
       win.btn_cutout_preview.isChecked())
 
 # Il click vero, sulle coordinate del raster di segmentazione — che per una
@@ -321,11 +339,18 @@ check("Reset riporta all'automatismo",
       and not win.cutout_cut_seeds)
 
 # Un click sul tratto non deve inventarsi una regione.
-semi_prima = len(win.cutout_cut_seeds)
-win.on_pixel_clicked(450, 30)     # sopra il disegno... regione esterna
-win.on_pixel_clicked(450, 400 - 370)  # sul contorno della corona
+win.on_pixel_clicked(450, 400 - 370)     # sul contorno della corona
 check("il click sul tratto non aggiunge semi fantasma",
-      all(win._cutout_regions_now().region_at(*s) > 0 for s in win.cutout_cut_seeds))
+      all(win._cutout_regions_now().region_at(*sd) > 0 for sd in win.cutout_cut_seeds))
+
+# Fuori dalla modalita' il click torna a chi lo aspettava: in Spot serve a
+# campionare un accento, e il ritaglio non deve rubarglielo.
+win.mode_selector.setCurrentIndex(3)
+win.set_active_spot_swatch(0)
+win.on_pixel_clicked(450, 590)
+check("fuori dalla modalita' il click torna agli accenti Spot",
+      win.spot_accents[0] is not None)
+win.mode_selector.setCurrentIndex(KEYCHAIN)
 
 # La maschera dipinta non ha regioni: i comandi a click devono spegnersi,
 # altrimenti promettono un controllo che li' non esiste.
@@ -341,15 +366,15 @@ win.toggle_ui_state(disabled=True)
 check("durante la generazione i controlli si bloccano",
       not win.btn_cutout_edit.isEnabled())
 win.toggle_ui_state(disabled=False)
-check("dopo lo sblocco lo stato condizionale e' rispettato",
-      win.btn_cutout_edit.isEnabled() and win.chk_cutout.isChecked())
-win.chk_cutout.setChecked(False)
+check("dopo lo sblocco i controlli tornano vivi", win.btn_cutout_edit.isEnabled())
+win.combo_cutout_src.setCurrentIndex(1)
 win.toggle_ui_state(disabled=True)
 win.toggle_ui_state(disabled=False)
-check("...anche a spunta spenta", not win.btn_cutout_edit.isEnabled())
+check("...ma la maschera dipinta resta senza click",
+      not win.btn_cutout_edit.isEnabled())
+win.combo_cutout_src.setCurrentIndex(0)
 
 # Caricare un'altra immagine deve azzerare i semi: nominano regioni di prima.
-win.chk_cutout.setChecked(True)
 win.btn_cutout_edit.setChecked(True)
 win.on_pixel_clicked(*P_VUOTO)
 check("(semi presenti prima del ricarico)", len(win.cutout_cut_seeds) == 1)

@@ -130,7 +130,7 @@ class MainWindowUI(QMainWindow):
         
         self.mode_selector = QComboBox()
         self.mode_selector.setObjectName("mode_selector")
-        self.mode_selector.addItems(["Standard Manga Relief", "Topographic Color (Single Extruder)", "Deckbox Engraving", "Spot Color (Silkscreen)", "Phone Cover Plate"])
+        self.mode_selector.addItems(["Standard Manga Relief", "Topographic Color (Single Extruder)", "Deckbox Engraving", "Spot Color (Silkscreen)", "Phone Cover Plate", "Keychain / Cutout"])
         right_layout.addWidget(self.mode_selector)
         
         self.group_deckbox = QGroupBox("Deckbox Settings")
@@ -267,19 +267,25 @@ class MainWindowUI(QMainWindow):
         self.combo_spot_naccents.currentIndexChanged.connect(
             lambda i: self.spot_swatches[1].setVisible(i == 1))
 
-        # CUTOUT / KEYCHAIN PANEL
-        # Vale per Standard, Topographic e Spot: sono le tre modalita' che
-        # producono un pannello rettangolare e basta. Deckbox e Cover una
-        # sagoma ce l'hanno gia' (la scatola, la plate) e il ritaglio le
-        # romperebbe, quindi li' il pannello non compare proprio.
-        self.group_cutout = QGroupBox("✂️ Cutout / Keychain")
+        # KEYCHAIN / CUTOUT PANEL (Hidden by default)
+        # E' una modalita' come le altre, quindi il pannello si vede solo
+        # quando la modalita' e' scelta e i suoi controlli sono sempre vivi:
+        # non c'e' una spunta da accendere prima, perche' la voce del menu e'
+        # gia' quella spunta.
+        self.group_keychain = QGroupBox("Keychain / Cutout Settings")
         cut_layout = QVBoxLayout()
 
-        self.chk_cutout = QCheckBox("Cut out the background (keychain)")
-        self.chk_cutout.setToolTip(
-            "Il pezzo prende la forma del disegno invece del rettangolo bianco.\n"
-            "Max Dim passa a misurare il pezzo ritagliato, non il foglio.")
-        cut_layout.addWidget(self.chk_cutout)
+        # Stessa domanda della cover, stessa forma di risposta: il ritaglio
+        # decide la SAGOMA, non i colori, e come colorare l'arte resta da
+        # scegliere.
+        self.combo_keychain_finish = QComboBox()
+        self.combo_keychain_finish.addItems(["Spot Color", "B/N (Standard)"])
+        self.combo_keychain_finish.setToolTip(
+            "Spot Color: base bianca + accenti + nero.\n"
+            "B/N: la posterizzazione della modalita' Standard.")
+        cut_form_top = QFormLayout()
+        cut_form_top.addRow("Finish:", self.combo_keychain_finish)
+        cut_layout.addLayout(cut_form_top)
 
         self.combo_cutout_src = QComboBox()
         self.combo_cutout_src.addItems(["Auto + click (regions)", "Painted mask (file)"])
@@ -346,24 +352,20 @@ class MainWindowUI(QMainWindow):
         self.btn_cutout_preview.setEnabled(False)
         cut_layout.addWidget(self.btn_cutout_preview)
 
-        self.group_cutout.setLayout(cut_layout)
-        right_layout.addWidget(self.group_cutout)
+        self.group_keychain.setLayout(cut_layout)
+        self.group_keychain.setVisible(False)
+        right_layout.addWidget(self.group_keychain)
 
-        # I controlli del ritaglio nascono spenti: senza la spunta non hanno
-        # niente su cui agire, e un cursore attivo che non fa niente e' peggio
-        # di uno grigio.
         self.cutout_widgets = [
-            self.combo_cutout_src, self.btn_cutout_paint, self.lbl_cutout_info,
-            self.btn_cutout_edit, self.btn_cutout_reset,
-            self.lbl_cutout_border, self.slider_cutout_border,
-            self.chk_cutout_ring, self.btn_cutout_ring, self.spin_ring_d,
-            self.btn_cutout_preview,
+            self.combo_keychain_finish, self.combo_cutout_src,
+            self.btn_cutout_paint, self.btn_cutout_edit, self.btn_cutout_reset,
+            self.slider_cutout_border, self.chk_cutout_ring,
+            self.btn_cutout_ring, self.spin_ring_d, self.btn_cutout_preview,
         ]
-        for wdg in self.cutout_widgets:
-            wdg.setEnabled(False)
-        self.chk_cutout.toggled.connect(self._on_cutout_toggled)
         self.combo_cutout_src.currentIndexChanged.connect(
             lambda i: self.btn_cutout_paint.setVisible(i == 1))
+        self.combo_keychain_finish.currentIndexChanged.connect(
+            lambda _: self._on_mode_changed(self.mode_selector.currentIndex()))
 
         # SWATCH PANEL
         self.group_swatch = QGroupBox("Color Picking (Click to calibrate)")
@@ -574,7 +576,7 @@ class MainWindowUI(QMainWindow):
             self.chk_cover_avoid_camera,
             self.combo_spot_naccents, self.btn_spot_auto, *self.spot_swatches,
             self.slider_spot_coverage, self.btn_spot_mockup,
-            self.chk_cutout, *self.cutout_widgets,
+            *self.cutout_widgets,
             self.chk_auto_midtones, *self.swatches,
             self.slider_bw_coverage, self.btn_std_mockup,
             self.spin_dim, self.spin_base, self.spin_maxh, self.spin_layer_height,
@@ -592,37 +594,31 @@ class MainWindowUI(QMainWindow):
         splitter.handle(1).setCursor(Qt.CursorShape.ArrowCursor)
         splitter.handle(1).setEnabled(False)
         
-    def _on_cutout_toggled(self, on):
-        """Accende i controlli del ritaglio con la spunta che li giustifica."""
-        for wdg in self.cutout_widgets:
-            wdg.setEnabled(bool(on))
-        if not on:
-            self.btn_cutout_edit.setChecked(False)
-            self.btn_cutout_ring.setChecked(False)
-            self.btn_cutout_preview.setChecked(False)
-
     def _on_mode_changed(self, index):
         """Toggle visibility of specific panels based on the selected mode."""
         is_topo    = (index == 1)
         is_deckbox = (index == 2)
         is_spot    = (index == 3)
         is_cover   = (index == 4)
+        is_keychain = (index == 5)
         cover_spot = is_cover and self.combo_cover_finish.currentIndex() == 1
+        keychain_spot = is_keychain and self.combo_keychain_finish.currentIndex() == 0
 
         self.group_topo.setVisible(is_topo)
         self.group_deckbox.setVisible(is_deckbox)
         self.group_cover.setVisible(is_cover)
-        # il gruppo Spot serve anche alla finitura Spot della cover
-        self.group_spot.setVisible(is_spot or cover_spot)
+        self.group_keychain.setVisible(is_keychain)
+        # il gruppo Spot serve anche alle finiture Spot di cover e portachiavi
+        self.group_spot.setVisible(is_spot or cover_spot or keychain_spot)
         # il selettore livelli grigio serve solo alla finitura B/N della cover
         self.combo_cover_levels.setVisible(is_cover and not cover_spot)
 
-        # Il ritaglio vale per le modalita' che producono un pannello e basta
-        self.group_cutout.setVisible(not (is_deckbox or is_cover))
-
-        # Hide standard relief controls when topo/spot/cover are active
-        self.group_swatch.setVisible(not (is_topo or is_spot or is_cover))
-        self.group_z.setVisible(not (is_topo or is_spot or is_cover))
+        # Gli swatch e le quote Standard servono a chi posterizza in grigio:
+        # il portachiavi B/N passa esattamente da li', quindi in quel caso
+        # restano — spariscono solo con la finitura Spot.
+        std_controls = not (is_topo or is_spot or is_cover or keychain_spot)
+        self.group_swatch.setVisible(std_controls)
+        self.group_z.setVisible(std_controls)
 
         # Dynamically lock physical parameters for Deckbox mode
         if is_deckbox:

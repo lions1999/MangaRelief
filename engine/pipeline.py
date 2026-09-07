@@ -445,11 +445,13 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
     # Va fatto per primo, e sulla sorgente a piena risoluzione: ritaglia anche
     # l'immagine al riquadro del pezzo, quindi tutto quello che viene dopo —
     # classificazione compresa — lavora già sul portachiavi e non sul foglio.
-    # Escluse le due modalità che una sagoma ce l'hanno di suo: la cover ha la
-    # plate, il deckbox ha la scatola.
+    # Non serve un flag che lo accenda: la modalità è il ritaglio. Resta da
+    # scegliere come colorare l'arte, e le due strade sono quelle che il
+    # motore ha già — Spot Color (base bianca + accenti + nero) o la
+    # posterizzazione Standard.
     cutout_mask = None
     cutout_pieces, cutout_ring_ok = 0, True
-    if p.cutout_enabled and not (p.is_cover_mode or p.is_deckbox_mode):
+    if p.is_keychain_mode:
         emit(4, "✂️ Building cutout silhouette...")
         cut = compute_cutout(
             img_work, max_dim=p.max_dim, white_clip=p.white_clip,
@@ -505,7 +507,7 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
         topo_colors = palette
         max_dim = max(pd['width'], pd['height'])
 
-    if p.is_spot_mode:
+    if p.is_spot_mode or (p.is_keychain_mode and p.keychain_finish_spot):
         emit(8, "🎯 Spot Color classification...")
         img_rgb_src = _as_rgb(img_work)
         small = downsample_for_analysis(img_rgb_src, p.max_res_cap)

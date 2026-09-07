@@ -8,7 +8,7 @@ This is `feature/keychain-cutout`, which descends from `feature/engine-extractio
 
 ## Project Overview
 
-MangaRelief Pro is a PyQt6 desktop app that quantizes manga grayscale (or full-color art) into "terraced" 3D relief/engraved meshes for multi-color 3D printing (STL + Bambu Studio-flavored 3MF). Five generation modes share one geometry/color engine:
+MangaRelief Pro is a PyQt6 desktop app that quantizes manga grayscale (or full-color art) into "terraced" 3D relief/engraved meshes for multi-color 3D printing (STL + Bambu Studio-flavored 3MF). Six generation modes share one geometry/color engine:
 
 1. **Standard** — grayscale relief, 2/3/4-color sub-modes auto-selected from midtone %.
 2. **Topographic Color** — K-Means dominant-color terraces from a full-color image.
@@ -16,7 +16,7 @@ MangaRelief Pro is a PyQt6 desktop app that quantizes manga grayscale (or full-c
 4. **Spot Color** — "silkscreen" mode: white base + 1-2 user-picked accent colors + black top, everything else binarized. Built for print accessibility (base + accent, not exact multi-color fidelity).
 5. **Phone Cover Plate** — generates a decorative back plate (multi-color, engraved or raised) sized to a specific phone's camera-cutout geometry, optionally paired with a companion TPU bumper/case STL.
 
-Cross-cutting on top of modes 1, 2 and 4: **Cutout / Keychain**, which replaces the rectangular panel with the silhouette of the drawing (see `engine/cutout_utils.py`).
+6. **Keychain / Cutout** — replaces the rectangular panel with the silhouette of the drawing (see `engine/cutout_utils.py`). Not a flag on the other modes: it is a mode, and like Phone Cover it carries a **Finish** selector (Spot Color / B-N) because the cutout decides the *shape*, not the colours.
 
 ## Commands
 
@@ -58,7 +58,7 @@ Qt widget tests must run with `QT_QPA_PLATFORM=offscreen` and **must call `win.s
   perche' la banda dipende da `color_changes_z`, che con l'auto-Z spento e'
   scritto a mano. Senza anteprima il cursore della copertura sarebbe cieco.
 
-- **Cutout panel** — `group_cutout` in `ui_main_window.py`, stato e click in `manga_to_3d.py` (`_cutout_*`). Tre cose non ovvie: (a) i click di modifica **accendono per forza l'anteprima**, perche' le coordinate vanno lette sul raster di segmentazione e l'unica immagine mostrata a quella risoluzione e' l'anteprima; (b) `_cutout_source()` deve restituire *la stessa immagine che ricevera' il motore* (grigio filtrato in Standard, RGB in Topo/Spot), altrimenti i confini delle regioni mostrati non sono quelli che verranno generati; (c) il ramo ritaglio in `on_pixel_clicked` ha la **precedenza** su swatch e accenti Spot, perche' e' l'unico che si arma esplicitamente e che mostra un'immagine sua (campionare un colore dal giallo dell'anteprima leggerebbe l'anteprima, non il disegno).
+- **Keychain panel** — `group_keychain` in `ui_main_window.py`, stato e click in `manga_to_3d.py` (`_cutout_*`). La finitura ne governa la forma esattamente come `combo_cover_finish` governa quella della cover: in Spot compare `group_spot`, in B/N tornano `group_swatch` e `group_z`. Tre cose non ovvie: (a) i click di modifica **accendono per forza l'anteprima**, perche' le coordinate vanno lette sul raster di segmentazione e l'unica immagine mostrata a quella risoluzione e' l'anteprima; (b) `_cutout_source()` deve restituire *la stessa immagine che ricevera' il motore* — e in questa modalita' dipende dalla finitura (RGB in Spot, grigio filtrato in B/N), quindi va tenuto allineato con la scelta di `input_img` in `generate_stl`, altrimenti i confini delle regioni mostrati non sono quelli che verranno generati; (c) il ramo ritaglio in `on_pixel_clicked` ha la **precedenza** su swatch e accenti Spot, perche' e' l'unico che si arma esplicitamente e che mostra un'immagine sua (campionare un colore dal giallo dell'anteprima leggerebbe l'anteprima, non il disegno).
 - **`ui_main_window.py`** — pure UI construction (`MainWindowUI`) + `ImageGraphicsView` (wheel-zoom/pan/`pixelClicked` signal). `_on_mode_changed` toggles per-mode group visibility. `self.lockable_widgets` is a flat registry of every widget that must disable during generation — **add new controls to this list, not to `toggle_ui_state`**, which just iterates the registry and restores mode-conditional states (auto-Z, auto-midtones, Deckbox-locked physical params, Cover levels selector) afterward.
 - **`engine/`** — the whole generation pipeline, **importable without PyQt** (so the same code can serve a web backend). Nothing under `engine/` may import PyQt or touch the filesystem outside `engine.resources`.
   - `engine/pipeline.py` — `generate(image, params, progress=None, should_cancel=None) -> GenerationResult`. One function branches by mode: prepares/composes the source image → classifies pixels into a palette → builds the heightmap/terrace mesh → optional decimation (`fast_simplification`, >`DECIMATE_THRESHOLD` = 200k faces) → export. `progress(pct, msg)` and `should_cancel()` are plain callables; errors propagate as exceptions (the caller decides how to present them).
@@ -78,7 +78,7 @@ Qt widget tests must run with `QT_QPA_PLATFORM=offscreen` and **must call `win.s
   - `mask_from_paint` e' la strada alternativa (opzione B, maschera dipinta a mano): li' non serve nessuna connettivita', e' materiale tutto cio' che non e' bianco. Resta come scorciatoia per i casi che il click non risolve.
   - `compute_cutout` fa **due giri** sul passo mm/pixel, e non e' una svista: `max_dim` misura il *pezzo ritagliato*, ma bordino e occhiello sono in millimetri e cambiano la sagoma — quindi il passo si conosce solo dopo aver saputo quanto e' grande la sagoma. Il terzo giro cambierebbe le cifre dopo la virgola.
   - La pipeline **ritaglia anche la sorgente** al riquadro della sagoma (`_crop_source_to`): senza, Max Dim continuerebbe a misurare il foglio e un disegno che ne occupa un quarto uscirebbe in scala 1:4.
-  - Escluse Deckbox e Phone Cover: una sagoma ce l'hanno gia' (la scatola, la plate) e il ritaglio le romperebbe.
+  - E' una **modalita'**, non un flag trasversale: `GenerationMode.KEYCHAIN` accende il ritaglio da solo, e `keychain_finish_spot` sceglie se l'arte passa dalla classificazione Spot o dalla posterizzazione Standard. Le altre modalita' non hanno ritaglio — Deckbox e Phone Cover una sagoma ce l'hanno gia' (la scatola, la plate), e Standard/Topo/Spot restano i pannelli rettangolari che erano.
   - `n_pieces > 1` e `ring_attached == False` finiscono in `GenerationResult` e nel popup: sono scelte prese dal motore (tenere un troncone solo) o errori di posizionamento che nel file non si vedono.
 - **`engine/color_utils.py`** — all pixel classification, shared across modes:
   - `rgb_to_lab(..., chroma_weight=...)` — Lab conversion with amplified a/b channels; `CHROMA_MATCH_WEIGHT=2.5` prevents neutral grays from matching saturated palette colors (was the root cause of "red bleeding onto black/white edges" in Topographic mode).

@@ -126,8 +126,9 @@ class Manga3DAppController(MainWindowUI):
         self.cmb_quality.currentIndexChanged.connect(lambda _: self._refresh_spot_mockup())
         self.btn_spot_mockup.toggled.connect(self._on_spot_mockup_toggled)
 
-        # Cutout / portachiavi
-        self.chk_cutout.toggled.connect(self._on_cutout_enabled)
+        # Keychain / Cutout
+        self.combo_keychain_finish.currentIndexChanged.connect(
+            self._on_keychain_finish_changed)
         self.combo_cutout_src.currentIndexChanged.connect(self._on_cutout_source_changed)
         self.btn_cutout_paint.clicked.connect(self._load_paint_mask)
         self.btn_cutout_edit.toggled.connect(self._on_cutout_edit_toggled)
@@ -188,6 +189,14 @@ class Manga3DAppController(MainWindowUI):
             self.spin_base.setValue(0.3)
             self.spin_maxh.setValue(1.0)
             self.spin_layer_height.setValue(0.10)
+        elif index == 5:
+            # Un portachiavi non e' un pannello: 200 mm di default sarebbero
+            # un sottopentola. 60 mm e' la taglia da portachiavi, e la base
+            # sale a 2 mm perche' il pezzo va tirato per l'anellino.
+            self.spin_dim.setValue(60.0)
+            self.spin_base.setValue(2.0)
+            self.spin_maxh.setValue(3.2)
+            self.spin_layer_height.setValue(0.20)
 
     def _on_phone_model_changed(self, _index):
         preset = self._current_phone_preset() or {}
@@ -265,6 +274,7 @@ class Manga3DAppController(MainWindowUI):
         2: GenerationMode.DECKBOX,
         3: GenerationMode.SPOT_COLOR,
         4: GenerationMode.PHONE_COVER,
+        5: GenerationMode.KEYCHAIN,
     }
 
     def _current_generation_mode(self) -> str:
@@ -510,7 +520,22 @@ class Manga3DAppController(MainWindowUI):
         idx = self.mode_selector.currentIndex()
         if idx in (1, 3):     # Topographic, Spot
             return getattr(self, 'img_rgb_original', None)
+        if idx == 5:          # Keychain: dipende dalla finitura scelta
+            return getattr(self, 'img_rgb_original' if self._keychain_spot()
+                           else 'img_filtered_array', None)
         return getattr(self, 'img_filtered_array', None)
+
+    def _keychain_spot(self) -> bool:
+        return self.combo_keychain_finish.currentIndex() == 0
+
+    def _is_keychain(self) -> bool:
+        return self.mode_selector.currentIndex() == 5
+
+    def _on_keychain_finish_changed(self, _idx):
+        """La finitura cambia l'immagine su cui si segmenta (RGB in Spot,
+        grigio filtrato in B/N), quindi le regioni vanno ricalcolate: la
+        cache è indicizzata anche sulla modalità, ma non sulla finitura."""
+        self._invalidate_cutout_regions()
 
     def _invalidate_cutout_regions(self, *_):
         self._cutout_regions = None
@@ -528,8 +553,8 @@ class Manga3DAppController(MainWindowUI):
         src = self._cutout_source()
         if src is None:
             return None
-        key = (self.mode_selector.currentIndex(), self.spin_white_clip.value(),
-               src.shape[:2])
+        key = (self.mode_selector.currentIndex(), self._keychain_spot(),
+               self.spin_white_clip.value(), src.shape[:2])
         if self._cutout_regions is None or self._cutout_regions_key != key:
             self._cutout_regions = segment_regions(
                 src, white_clip=self.spin_white_clip.value(), seg_res=SEG_MAX_RES)
@@ -560,25 +585,13 @@ class Manga3DAppController(MainWindowUI):
         regions = None if kw['paint_mask'] is not None else self._cutout_regions_now()
         return compute_cutout(src, regions=regions, **kw)
 
-    def _on_cutout_enabled(self, on):
-        """La spunta principale. Accendendola si accende anche l'anteprima:
-        un ritaglio che non si vede e' una scommessa fino all'export."""
-        if on and self._cutout_source() is None:
-            return
-        if on:
-            self.btn_cutout_preview.setChecked(True)
-        else:
-            self.btn_cutout_edit.setChecked(False)
-            self.btn_cutout_ring.setChecked(False)
-            self.btn_cutout_preview.setChecked(False)
-
     def _on_cutout_source_changed(self, idx):
         """Con la maschera dipinta le regioni non esistono: i click non hanno
         niente da commutare, e lasciarli attivi prometterebbe un controllo che
         non c'e'."""
         auto = (idx == 0)
         for wdg in (self.btn_cutout_edit, self.btn_cutout_reset):
-            wdg.setEnabled(auto and self.chk_cutout.isChecked())
+            wdg.setEnabled(auto)
         if not auto:
             self.btn_cutout_edit.setChecked(False)
             self.lbl_cutout_info.setText(
@@ -952,7 +965,7 @@ class Manga3DAppController(MainWindowUI):
         self.cutout_paint_mask = None
         self.cutout_ring_xy = None
         self._invalidate_cutout_regions()
-        self.btn_cutout_preview.setEnabled(self.chk_cutout.isChecked())
+        self.btn_cutout_preview.setEnabled(True)
         self._update_viewport_mode(self.mode_selector.currentIndex())
 
         h, w = img.shape
@@ -1023,7 +1036,7 @@ class Manga3DAppController(MainWindowUI):
         # arma esplicitamente (Edit regions / Place) e che mostra un'immagine
         # sua, sulla quale un campionamento di colore leggerebbe il giallo
         # dell'anteprima invece del disegno.
-        if self.chk_cutout.isChecked() and self._cutout_click(x, y):
+        if self._is_keychain() and self._cutout_click(x, y):
             return
 
         # Ramo Spot Color: campionamento accento (ha priorità quando armato)
@@ -1184,7 +1197,11 @@ class Manga3DAppController(MainWindowUI):
         
         # In Topo/Spot/Cover mode, pass the RGB image instead of the filtered grayscale one
         is_spot = (self.mode_selector.currentIndex() == 3)
-        input_img = self.img_rgb_original if (is_topo or is_spot or is_cover) else self.img_filtered_array
+        # Il portachiavi segue la sua finitura, come ovunque altro: e' la
+        # stessa scelta che fa _cutout_source(), e le due devono coincidere o
+        # i confini delle regioni mostrati non sono quelli generati.
+        want_rgb = is_topo or is_spot or is_cover or (self._is_keychain() and self._keychain_spot())
+        input_img = self.img_rgb_original if want_rgb else self.img_filtered_array
 
         params = GenerationParams(
             mode=self._current_generation_mode(),
@@ -1213,7 +1230,7 @@ class Manga3DAppController(MainWindowUI):
             cover_engraved=(self.combo_cover_surface.currentIndex() == 0),
             cover_gray_levels=self.combo_cover_levels.currentIndex() + 2,
             include_bumper=self.chk_cover_bumper.isChecked(),
-            cutout_enabled=self.chk_cutout.isChecked(),
+            keychain_finish_spot=self._keychain_spot(),
             cutout_cut_seeds=list(self.cutout_cut_seeds),
             cutout_keep_seeds=list(self.cutout_keep_seeds),
             cutout_paint_mask=(self.cutout_paint_mask
@@ -1283,12 +1300,10 @@ class Manga3DAppController(MainWindowUI):
             self.btn_generate.setEnabled(True)
 
     def _on_cutout_enabled_restore(self):
-        """Rimette i controlli del ritaglio nello stato che la spunta e la
-        sorgente impongono, dopo che l'unlock li ha riaccesi tutti."""
-        on = self.chk_cutout.isChecked()
-        for wdg in self.cutout_widgets:
-            wdg.setEnabled(on)
-        if on and self.combo_cutout_src.currentIndex() == 1:
+        """Con la maschera dipinta i comandi a click non hanno regioni su cui
+        agire: l'unlock generale li riaccenderebbe, promettendo un controllo
+        che in quella strada non esiste."""
+        if self.combo_cutout_src.currentIndex() == 1:
             self.btn_cutout_edit.setEnabled(False)
             self.btn_cutout_reset.setEnabled(False)
 
@@ -1423,7 +1438,7 @@ class Manga3DAppController(MainWindowUI):
         # disegno era in piu' tronconi ne e' uscito uno, e un occhiello
         # staccato e' un anellino che si stacca alla prima tirata.
         res = getattr(getattr(self, 'worker', None), 'result', None)
-        if self.chk_cutout.isChecked() and res is not None:
+        if self._is_keychain() and res is not None:
             if getattr(res, 'cutout_n_pieces', 0) > 1:
                 msg += (f"⚠️  Il disegno era in {res.cutout_n_pieces} pezzi separati:\n"
                         f"    ne è stato tenuto solo il più grande.\n"

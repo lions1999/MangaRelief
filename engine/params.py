@@ -18,6 +18,7 @@ class GenerationMode:
     DECKBOX = "deckbox"
     SPOT_COLOR = "spot_color"
     PHONE_COVER = "phone_cover"
+    KEYCHAIN = "keychain"
 
 
 @dataclass
@@ -58,14 +59,19 @@ class GenerationParams:
     # --- Deckbox ---
     tcg_name: str = "Yu-Gi-Oh!"
 
-    # --- Ritaglio sagoma (portachiavi) ---
+    # --- Keychain / Cutout ---
+    # Non c'è un flag che accende il ritaglio: la modalità È il ritaglio, come
+    # per ogni altra voce del selettore. Quello che resta da scegliere è come
+    # colorare l'arte, e la domanda è la stessa che si fa la cover — quindi
+    # stessa forma di risposta (cfr. cover_finish_spot).
+    keychain_finish_spot: bool = True
+
     # Le correzioni all'automatismo viaggiano come SEMI, non come raster: una
     # lista di (x, y) che nominano una regione. Le coordinate sono quelle del
     # raster di segmentazione (engine.cutout_utils.seg_shape_for con
     # cutout_seg_res), che dipende solo dalla forma della sorgente e dal cap —
     # quindi restano valide mentre si muove White Clip, e questi parametri
     # restano serializzabili come tutti gli altri.
-    cutout_enabled: bool = False
     cutout_cut_seeds: List[Tuple[int, int]] = field(default_factory=list)
     cutout_keep_seeds: List[Tuple[int, int]] = field(default_factory=list)
     # Strada alternativa: la maschera dipinta a mano (giallo = stampa). Se c'e',
@@ -114,6 +120,10 @@ class GenerationParams:
     @property
     def is_cover_mode(self) -> bool:
         return self.mode == GenerationMode.PHONE_COVER
+
+    @property
+    def is_keychain_mode(self) -> bool:
+        return self.mode == GenerationMode.KEYCHAIN
 
     def to_dict(self) -> Dict[str, Any]:
         """Forma serializzabile, per loggare cosa è stato generato.
