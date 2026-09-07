@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Branch scope
 
-This is `feature/engine-extraction`, which descends from `feature/phone-cover` ← `feature/spot-color` ← `feature/topo-color-mode`. It carries the full feature set: Standard, Topographic Color, Deckbox, Spot Color, and Phone Cover generation modes, with the generation logic extracted into a PyQt-free `engine/` package (see Architecture). Other branches (`main`, `feature/topo-color-mode`, `feature/spot-color`, `feature/phone-cover`) represent earlier release points on the same project — do not assume they have these files.
+This is `feature/keychain-cutout`, which descends from `feature/engine-extraction` ← `feature/phone-cover` ← `feature/spot-color` ← `feature/topo-color-mode`. It carries the full feature set: Standard, Topographic Color, Deckbox, Spot Color and Phone Cover generation modes, the generation logic extracted into a PyQt-free `engine/` package (see Architecture), and the Cutout / Keychain option on top. Other branches (`main`, `feature/topo-color-mode`, `feature/spot-color`, `feature/phone-cover`, `feature/engine-extraction`) represent earlier release points on the same project — do not assume they have these files.
 
 ## Project Overview
 
