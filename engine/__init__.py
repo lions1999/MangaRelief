@@ -17,6 +17,9 @@ from .pipeline import (generate, companion_path_for, standard_heightmap,
                        prepare_source_image, tone_targets,
                        TCG_LOGO_MAP)
 from .color_utils import bw_coverage_map, ink_level
+from .cutout_utils import (segment_regions, resolve_cut_flags, mask_from_regions,
+                           mask_from_paint, compute_cutout, overlay_preview,
+                           seg_shape_for, to_seg_raster, SEG_MAX_RES)
 from .resources import asset_path, assets_dir, set_assets_dir
 
 __all__ = [
@@ -30,6 +33,15 @@ __all__ = [
     "tone_targets",
     "bw_coverage_map",
     "ink_level",
+    "segment_regions",
+    "resolve_cut_flags",
+    "mask_from_regions",
+    "mask_from_paint",
+    "compute_cutout",
+    "overlay_preview",
+    "seg_shape_for",
+    "to_seg_raster",
+    "SEG_MAX_RES",
     "TCG_LOGO_MAP",
     "asset_path",
     "assets_dir",

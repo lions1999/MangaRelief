@@ -58,6 +58,28 @@ class GenerationParams:
     # --- Deckbox ---
     tcg_name: str = "Yu-Gi-Oh!"
 
+    # --- Ritaglio sagoma (portachiavi) ---
+    # Le correzioni all'automatismo viaggiano come SEMI, non come raster: una
+    # lista di (x, y) che nominano una regione. Le coordinate sono quelle del
+    # raster di segmentazione (engine.cutout_utils.seg_shape_for con
+    # cutout_seg_res), che dipende solo dalla forma della sorgente e dal cap —
+    # quindi restano valide mentre si muove White Clip, e questi parametri
+    # restano serializzabili come tutti gli altri.
+    cutout_enabled: bool = False
+    cutout_cut_seeds: List[Tuple[int, int]] = field(default_factory=list)
+    cutout_keep_seeds: List[Tuple[int, int]] = field(default_factory=list)
+    # Strada alternativa: la maschera dipinta a mano (giallo = stampa). Se c'e',
+    # sostituisce del tutto segmentazione e semi.
+    cutout_paint_mask: Optional[Any] = None      # ndarray RGB
+    cutout_seg_res: int = 1600
+    cutout_border_mm: float = 0.0                # bordino da sticker
+    cutout_min_feature_mm: float = 0.8           # pulviscolo e fori sotto soglia
+    cutout_keep_largest: bool = True             # un portachiavi e' un pezzo solo
+    cutout_ring: bool = False
+    cutout_ring_xy: Optional[Tuple[int, int]] = None
+    cutout_ring_d_mm: float = 4.0                # foro per l'anellino
+    cutout_ring_rim_mm: float = 2.0              # materiale attorno al foro
+
     # --- Phone Cover ---
     cover_preset: Optional[Dict[str, Any]] = None
     cover_scale: float = 1.0
@@ -94,8 +116,18 @@ class GenerationParams:
         return self.mode == GenerationMode.PHONE_COVER
 
     def to_dict(self) -> Dict[str, Any]:
-        """Forma serializzabile, per loggare cosa è stato generato."""
-        return asdict(self)
+        """Forma serializzabile, per loggare cosa è stato generato.
+
+        La maschera dipinta è l'unico campo che non è un numero: asdict ne
+        farebbe una copia profonda di qualche megabyte dentro quello che
+        dovrebbe essere una riga di log. Nel dizionario ne resta la forma, che
+        è tutto ciò che serve per ricostruire cosa è stato passato.
+        """
+        d = asdict(self)
+        pm = d.get('cutout_paint_mask')
+        if pm is not None:
+            d['cutout_paint_mask'] = f"<mask {getattr(self.cutout_paint_mask, 'shape', '?')}>"
+        return d
 
 
 @dataclass
@@ -112,3 +144,11 @@ class GenerationResult:
     # lasciarli sepolti nel file.
     color_changes_z: List[float] = field(default_factory=list)
     slot_colors: List[str] = field(default_factory=list)   # '#rrggbb', dal 2° slot
+
+    # Ritaglio: quello che il motore ha scoperto e chi stampa deve sapere.
+    # n_pieces > 1 significa che il disegno era in più tronconi e ne è stato
+    # tenuto uno solo; ring_attached False che l'occhiello è staccato dal
+    # pezzo. Nessuna delle due è un errore di generazione — sono scelte da
+    # rivedere, e restano invisibili se il motore non le dichiara.
+    cutout_n_pieces: int = 0
+    cutout_ring_attached: bool = True

@@ -267,6 +267,104 @@ class MainWindowUI(QMainWindow):
         self.combo_spot_naccents.currentIndexChanged.connect(
             lambda i: self.spot_swatches[1].setVisible(i == 1))
 
+        # CUTOUT / KEYCHAIN PANEL
+        # Vale per Standard, Topographic e Spot: sono le tre modalita' che
+        # producono un pannello rettangolare e basta. Deckbox e Cover una
+        # sagoma ce l'hanno gia' (la scatola, la plate) e il ritaglio le
+        # romperebbe, quindi li' il pannello non compare proprio.
+        self.group_cutout = QGroupBox("✂️ Cutout / Keychain")
+        cut_layout = QVBoxLayout()
+
+        self.chk_cutout = QCheckBox("Cut out the background (keychain)")
+        self.chk_cutout.setToolTip(
+            "Il pezzo prende la forma del disegno invece del rettangolo bianco.\n"
+            "Max Dim passa a misurare il pezzo ritagliato, non il foglio.")
+        cut_layout.addWidget(self.chk_cutout)
+
+        self.combo_cutout_src = QComboBox()
+        self.combo_cutout_src.addItems(["Auto + click (regions)", "Painted mask (file)"])
+        self.combo_cutout_src.setToolTip(
+            "Auto: e' vuoto solo cio' che tocca il bordo dell'immagine, il resto\n"
+            "si corregge a click. Painted mask: una seconda immagine in cui hai\n"
+            "colorato le parti da stampare e lasciato bianco il vuoto.")
+        cut_layout.addWidget(self.combo_cutout_src)
+
+        self.btn_cutout_paint = QPushButton("📂 Load painted mask…")
+        self.btn_cutout_paint.setVisible(False)
+        cut_layout.addWidget(self.btn_cutout_paint)
+
+        # Il testo che spiega *perche'* servono i click: senza, la modalita'
+        # sembra rotta ogni volta che l'automatismo tiene un vuoto racchiuso.
+        self.lbl_cutout_info = QLabel(
+            "Auto toglie solo lo sfondo esterno. I vuoti chiusi dal disegno "
+            "(fra una nuvola e il cappello, dentro un ricciolo) restano pieni: "
+            "attiva Edit regions e clicca dentro quelli da bucare.")
+        self.lbl_cutout_info.setWordWrap(True)
+        cut_layout.addWidget(self.lbl_cutout_info)
+
+        edit_row = QHBoxLayout()
+        self.btn_cutout_edit = QPushButton("✂️ Edit regions")
+        self.btn_cutout_edit.setCheckable(True)
+        self.btn_cutout_edit.setToolTip("Clicca dentro una regione per bucarla; ri-clicca per richiuderla.")
+        self.btn_cutout_reset = QPushButton("↺ Reset")
+        self.btn_cutout_reset.setFixedWidth(70)
+        edit_row.addWidget(self.btn_cutout_edit)
+        edit_row.addWidget(self.btn_cutout_reset)
+        cut_layout.addLayout(edit_row)
+
+        cut_form = QFormLayout()
+
+        self.lbl_cutout_border = QLabel("Sticker border: 0.0 mm")
+        self.slider_cutout_border = QSlider(Qt.Orientation.Horizontal)
+        self.slider_cutout_border.setRange(0, 30)   # decimi di mm
+        self.slider_cutout_border.setValue(0)
+        self.slider_cutout_border.setToolTip(
+            "Allarga la sagoma verso l'esterno: il bordino bianco degli sticker.\n"
+            "Ingrossa anche i tratti sottili che da soli non stamperebbero.")
+        cut_form.addRow(self.lbl_cutout_border, self.slider_cutout_border)
+
+        ring_row = QHBoxLayout()
+        self.chk_cutout_ring = QCheckBox("Keyring hole")
+        self.btn_cutout_ring = QPushButton("📍 Place")
+        self.btn_cutout_ring.setCheckable(True)
+        self.btn_cutout_ring.setFixedWidth(80)
+        self.spin_ring_d = QDoubleSpinBox()
+        self.spin_ring_d.setRange(1.5, 12.0)
+        self.spin_ring_d.setValue(4.0)
+        self.spin_ring_d.setSingleStep(0.5)
+        self.spin_ring_d.setFixedWidth(70)
+        self.spin_ring_d.setToolTip("Diametro del foro per l'anellino (mm).")
+        ring_row.addWidget(self.chk_cutout_ring)
+        ring_row.addWidget(self.btn_cutout_ring)
+        ring_row.addWidget(self.spin_ring_d)
+        cut_form.addRow(ring_row)
+
+        cut_layout.addLayout(cut_form)
+
+        self.btn_cutout_preview = QPushButton("👁 Cutout Preview")
+        self.btn_cutout_preview.setCheckable(True)
+        self.btn_cutout_preview.setEnabled(False)
+        cut_layout.addWidget(self.btn_cutout_preview)
+
+        self.group_cutout.setLayout(cut_layout)
+        right_layout.addWidget(self.group_cutout)
+
+        # I controlli del ritaglio nascono spenti: senza la spunta non hanno
+        # niente su cui agire, e un cursore attivo che non fa niente e' peggio
+        # di uno grigio.
+        self.cutout_widgets = [
+            self.combo_cutout_src, self.btn_cutout_paint, self.lbl_cutout_info,
+            self.btn_cutout_edit, self.btn_cutout_reset,
+            self.lbl_cutout_border, self.slider_cutout_border,
+            self.chk_cutout_ring, self.btn_cutout_ring, self.spin_ring_d,
+            self.btn_cutout_preview,
+        ]
+        for wdg in self.cutout_widgets:
+            wdg.setEnabled(False)
+        self.chk_cutout.toggled.connect(self._on_cutout_toggled)
+        self.combo_cutout_src.currentIndexChanged.connect(
+            lambda i: self.btn_cutout_paint.setVisible(i == 1))
+
         # SWATCH PANEL
         self.group_swatch = QGroupBox("Color Picking (Click to calibrate)")
         swatch_layout = QVBoxLayout()
@@ -476,6 +574,7 @@ class MainWindowUI(QMainWindow):
             self.chk_cover_avoid_camera,
             self.combo_spot_naccents, self.btn_spot_auto, *self.spot_swatches,
             self.slider_spot_coverage, self.btn_spot_mockup,
+            self.chk_cutout, *self.cutout_widgets,
             self.chk_auto_midtones, *self.swatches,
             self.slider_bw_coverage, self.btn_std_mockup,
             self.spin_dim, self.spin_base, self.spin_maxh, self.spin_layer_height,
@@ -493,6 +592,15 @@ class MainWindowUI(QMainWindow):
         splitter.handle(1).setCursor(Qt.CursorShape.ArrowCursor)
         splitter.handle(1).setEnabled(False)
         
+    def _on_cutout_toggled(self, on):
+        """Accende i controlli del ritaglio con la spunta che li giustifica."""
+        for wdg in self.cutout_widgets:
+            wdg.setEnabled(bool(on))
+        if not on:
+            self.btn_cutout_edit.setChecked(False)
+            self.btn_cutout_ring.setChecked(False)
+            self.btn_cutout_preview.setChecked(False)
+
     def _on_mode_changed(self, index):
         """Toggle visibility of specific panels based on the selected mode."""
         is_topo    = (index == 1)
@@ -508,6 +616,9 @@ class MainWindowUI(QMainWindow):
         self.group_spot.setVisible(is_spot or cover_spot)
         # il selettore livelli grigio serve solo alla finitura B/N della cover
         self.combo_cover_levels.setVisible(is_cover and not cover_spot)
+
+        # Il ritaglio vale per le modalita' che producono un pannello e basta
+        self.group_cutout.setVisible(not (is_deckbox or is_cover))
 
         # Hide standard relief controls when topo/spot/cover are active
         self.group_swatch.setVisible(not (is_topo or is_spot or is_cover))

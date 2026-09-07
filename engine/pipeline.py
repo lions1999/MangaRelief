@@ -25,6 +25,7 @@ from .color_utils import (bw_coverage_map, classify_spot_pixels, downsample_for_
                           quantize_grayscale_levels)
 from .case_utils import (build_plate_raster, build_case_plate_raster,
                          compose_plate_art, build_bumper)
+from .cutout_utils import compute_cutout, crop, resize_mask
 
 # Mapping TCG game names → logo asset filenames
 TCG_LOGO_MAP = {
@@ -36,6 +37,27 @@ TCG_LOGO_MAP = {
 }
 
 DECIMATE_THRESHOLD = 200_000
+
+
+def _crop_source_to(img, bbox, seg_shape):
+    """Ritaglia la sorgente al riquadro della sagoma, che è calcolato sul
+    raster di segmentazione (più piccolo): le due risoluzioni si riallineano
+    scalando il riquadro, e l'arrotondamento non conta perché la maschera
+    verrà comunque riportata sulla griglia della mesh con INTER_NEAREST.
+
+    Serve perché Max Dim misura il *pezzo*, non il foglio: senza questo
+    ritaglio un disegno che occupa metà immagine uscirebbe grande la metà di
+    quello che l'utente ha chiesto.
+    """
+    sh, sw = img.shape[:2]
+    gh, gw = seg_shape
+    fy, fx = sh / float(gh), sw / float(gw)
+    y0, y1, x0, x1 = bbox
+    y0, y1 = int(np.floor(y0 * fy)), int(np.ceil(y1 * fy))
+    x0, x1 = int(np.floor(x0 * fx)), int(np.ceil(x1 * fx))
+    y0, x0 = max(0, y0), max(0, x0)
+    y1, x1 = min(sh, max(y0 + 1, y1)), min(sw, max(x0 + 1, x1))
+    return img[y0:y1, x0:x1]
 
 
 def companion_path_for(plate_path: str) -> str:
@@ -418,6 +440,35 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
     export_slot_colors = export_palette[1:]
 
     plate_mask = None
+
+    # --- Ritaglio della sagoma (portachiavi) ---
+    # Va fatto per primo, e sulla sorgente a piena risoluzione: ritaglia anche
+    # l'immagine al riquadro del pezzo, quindi tutto quello che viene dopo —
+    # classificazione compresa — lavora già sul portachiavi e non sul foglio.
+    # Escluse le due modalità che una sagoma ce l'hanno di suo: la cover ha la
+    # plate, il deckbox ha la scatola.
+    cutout_mask = None
+    cutout_pieces, cutout_ring_ok = 0, True
+    if p.cutout_enabled and not (p.is_cover_mode or p.is_deckbox_mode):
+        emit(4, "✂️ Building cutout silhouette...")
+        cut = compute_cutout(
+            img_work, max_dim=p.max_dim, white_clip=p.white_clip,
+            seg_res=p.cutout_seg_res, paint_mask=p.cutout_paint_mask,
+            cut_seeds=p.cutout_cut_seeds, keep_seeds=p.cutout_keep_seeds,
+            border_mm=p.cutout_border_mm,
+            min_feature_mm=p.cutout_min_feature_mm,
+            keep_largest=p.cutout_keep_largest,
+            ring_xy=(p.cutout_ring_xy if p.cutout_ring else None),
+            ring_d_mm=p.cutout_ring_d_mm, ring_rim_mm=p.cutout_ring_rim_mm)
+        if cut.empty or cut.bbox is None:
+            raise ValueError(
+                "Il ritaglio non lascia materiale: controlla le regioni "
+                "marcate come vuoto, o la maschera dipinta.")
+        cutout_mask = crop(cut.mask, cut.bbox)
+        img_work = _crop_source_to(img_work, cut.bbox, cut.mask.shape[:2])
+        cutout_pieces, cutout_ring_ok = cut.n_pieces, cut.ring_attached
+        check_cancel()
+
     if p.is_cover_mode and p.cover_preset:
         emit(6, "📱 Composing artwork on plate...")
         img_rgb_src = _as_rgb(img_work)
@@ -475,6 +526,14 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
             p.base_h, p.max_h, p.layer_height, len(topo_colors))
         export_changes_z = compute_topo_switch_z(topo_z_heights, p.layer_height)
         img_rgb = _as_rgb(img_work)
+
+        if cutout_mask is not None:
+            # Con una maschera, process_mesh_topo pretende che l'immagine sia
+            # già alla risoluzione finale (non può ridimensionarla per conto
+            # suo senza sfasarla dalla sagoma): il downscale lo facciamo qui,
+            # e la maschera segue sulla stessa griglia.
+            img_rgb = downsample_for_analysis(img_rgb, p.max_res_cap)
+            plate_mask = resize_mask(cutout_mask, img_rgb.shape[:2])
 
         # Le plate cover sono piccole (~70mm): un dettaglio manga da 0.5mm
         # coprirebbe una frazione enorme del disegno. In incisione il solco è
@@ -536,7 +595,9 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
         X, Y = np.meshgrid(x, y)
 
         emit(40, "Generating solid vertices (Watertight)...")
-        mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0)
+        std_mask = (resize_mask(cutout_mask, Z.shape)
+                    if cutout_mask is not None else None)
+        mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0, mask=std_mask)
         check_cancel()
 
     # --- 4. Mesh Assembly ---
@@ -635,5 +696,7 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
     result.color_changes_z = [round(float(z), 3)
                               for z in (export_changes_z or []) if z > 0]
     result.slot_colors = list(export_slot_colors or [])
+    result.cutout_n_pieces = cutout_pieces
+    result.cutout_ring_attached = cutout_ring_ok
     result.elapsed_s = time.time() - t_start_total
     return result

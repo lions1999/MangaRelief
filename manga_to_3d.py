@@ -20,6 +20,8 @@ from engine.color_utils import (extract_dominant_colors, suggest_midtones,
                          suggest_spot_accents, classify_spot_pixels,
                          downsample_for_analysis, build_spot_palette,
                          grayscale_palette)
+from engine.cutout_utils import (SEG_MAX_RES, compute_cutout, overlay_preview,
+                                  segment_regions, to_seg_raster)
 from engine.mesh_utils import compute_topo_z_heights, compute_topo_switch_z
 from engine.case_utils import (load_phone_presets, build_plate_raster,
                         build_case_plate_raster, compose_plate_art)
@@ -58,6 +60,17 @@ class Manga3DAppController(MainWindowUI):
         # Spot Color state
         self.spot_accents = [None, None]
         self.active_spot_swatch = None
+
+        # Ritaglio sagoma. I semi sono coordinate del raster di segmentazione
+        # (lo stesso su cui si disegna l'anteprima, quindi i click ci cadono
+        # dentro senza conversioni), e sono l'unica forma in cui la scelta
+        # dell'utente viaggia fino al motore.
+        self.cutout_cut_seeds = []
+        self.cutout_keep_seeds = []
+        self.cutout_paint_mask = None
+        self.cutout_ring_xy = None
+        self._cutout_regions = None
+        self._cutout_regions_key = None
 
         # Phone Cover state
         try:
@@ -113,6 +126,21 @@ class Manga3DAppController(MainWindowUI):
         self.cmb_quality.currentIndexChanged.connect(lambda _: self._refresh_spot_mockup())
         self.btn_spot_mockup.toggled.connect(self._on_spot_mockup_toggled)
 
+        # Cutout / portachiavi
+        self.chk_cutout.toggled.connect(self._on_cutout_enabled)
+        self.combo_cutout_src.currentIndexChanged.connect(self._on_cutout_source_changed)
+        self.btn_cutout_paint.clicked.connect(self._load_paint_mask)
+        self.btn_cutout_edit.toggled.connect(self._on_cutout_edit_toggled)
+        self.btn_cutout_reset.clicked.connect(self._reset_cutout)
+        self.btn_cutout_preview.toggled.connect(self._on_cutout_preview_toggled)
+        self.slider_cutout_border.valueChanged.connect(self._on_cutout_border_changed)
+        self.chk_cutout_ring.toggled.connect(lambda _: self._refresh_cutout_preview())
+        self.spin_ring_d.valueChanged.connect(lambda _: self._refresh_cutout_preview())
+        # White Clip decide cosa e' tratto, quindi ridisegna i confini delle
+        # regioni: la segmentazione in cache non vale piu'.
+        self.spin_white_clip.valueChanged.connect(self._invalidate_cutout_regions)
+        self.spin_dim.valueChanged.connect(lambda _: self._refresh_cutout_preview())
+
         # Standard: la copertura e l'anteprima della classificazione. Le stesse
         # cose che tengono vivo il mockup Spot lo tengono vivo anche qui —
         # ritaglio, qualita' e quote di cambio colore cambiano su quale bobina
@@ -134,6 +162,9 @@ class Manga3DAppController(MainWindowUI):
             return  # il toggle handler richiama questo metodo col viewport giusto
         if self.btn_cover_preview.isChecked():
             self.btn_cover_preview.setChecked(False)
+            return
+        if self.btn_cutout_preview.isChecked():
+            self.btn_cutout_preview.setChecked(False)
             return
 
         if getattr(self, 'img_filtered_array', None) is None:
@@ -464,6 +495,263 @@ class Manga3DAppController(MainWindowUI):
             f"👁 Mockup: {p.color_mode}-color classification at "
             f"{max(dipinta.shape)}px")
 
+    # ------------------------------------------------------------------
+    # RITAGLIO SAGOMA — regioni, click, anteprima
+
+    def _cutout_source(self):
+        """L'immagine su cui si segmenta.
+
+        Deve essere *la stessa* che ricevera' il motore, non semplicemente
+        l'originale: in Standard il motore lavora sul grigio filtrato, e
+        segmentare l'RGB qui vorrebbe dire mostrare confini di regione che poi
+        in generazione cadono altrove (una campitura satura ma chiara e' tratto
+        a colori e carta in grigio). Rispecchia la scelta di generate_stl.
+        """
+        idx = self.mode_selector.currentIndex()
+        if idx in (1, 3):     # Topographic, Spot
+            return getattr(self, 'img_rgb_original', None)
+        return getattr(self, 'img_filtered_array', None)
+
+    def _invalidate_cutout_regions(self, *_):
+        self._cutout_regions = None
+        self._cutout_regions_key = None
+        self._refresh_cutout_preview()
+
+    def _cutout_regions_now(self):
+        """La segmentazione corrente, ricalcolata solo quando serve davvero.
+
+        Chiave: modalita' e White Clip, cioe' le sole cose che spostano i
+        confini. La forma del raster invece non dipende da loro, quindi i semi
+        gia' raccolti restano validi attraverso un ricalcolo — che e' il motivo
+        per cui muovere White Clip non cancella il lavoro fatto a click.
+        """
+        src = self._cutout_source()
+        if src is None:
+            return None
+        key = (self.mode_selector.currentIndex(), self.spin_white_clip.value(),
+               src.shape[:2])
+        if self._cutout_regions is None or self._cutout_regions_key != key:
+            self._cutout_regions = segment_regions(
+                src, white_clip=self.spin_white_clip.value(), seg_res=SEG_MAX_RES)
+            self._cutout_regions_key = key
+        return self._cutout_regions
+
+    def _cutout_kwargs(self):
+        """I parametri del ritaglio letti dall'interfaccia, in un posto solo:
+        anteprima e generazione devono chiedere le stesse cose."""
+        return dict(
+            max_dim=self.spin_dim.value(),
+            white_clip=self.spin_white_clip.value(),
+            seg_res=SEG_MAX_RES,
+            paint_mask=(self.cutout_paint_mask
+                        if self.combo_cutout_src.currentIndex() == 1 else None),
+            cut_seeds=list(self.cutout_cut_seeds),
+            keep_seeds=list(self.cutout_keep_seeds),
+            border_mm=self.slider_cutout_border.value() / 10.0,
+            ring_xy=(self.cutout_ring_xy if self.chk_cutout_ring.isChecked() else None),
+            ring_d_mm=self.spin_ring_d.value(),
+        )
+
+    def _compute_cutout_now(self):
+        src = self._cutout_source()
+        if src is None:
+            return None
+        kw = self._cutout_kwargs()
+        regions = None if kw['paint_mask'] is not None else self._cutout_regions_now()
+        return compute_cutout(src, regions=regions, **kw)
+
+    def _on_cutout_enabled(self, on):
+        """La spunta principale. Accendendola si accende anche l'anteprima:
+        un ritaglio che non si vede e' una scommessa fino all'export."""
+        if on and self._cutout_source() is None:
+            return
+        if on:
+            self.btn_cutout_preview.setChecked(True)
+        else:
+            self.btn_cutout_edit.setChecked(False)
+            self.btn_cutout_ring.setChecked(False)
+            self.btn_cutout_preview.setChecked(False)
+
+    def _on_cutout_source_changed(self, idx):
+        """Con la maschera dipinta le regioni non esistono: i click non hanno
+        niente da commutare, e lasciarli attivi prometterebbe un controllo che
+        non c'e'."""
+        auto = (idx == 0)
+        for wdg in (self.btn_cutout_edit, self.btn_cutout_reset):
+            wdg.setEnabled(auto and self.chk_cutout.isChecked())
+        if not auto:
+            self.btn_cutout_edit.setChecked(False)
+            self.lbl_cutout_info.setText(
+                "Maschera dipinta: e' materiale tutto cio' che non e' bianco, "
+                "ed e' vuoto ogni bianco — esterno e racchiuso allo stesso modo. "
+                "Nessun click da fare.")
+        else:
+            self.lbl_cutout_info.setText(
+                "Auto toglie solo lo sfondo esterno. I vuoti chiusi dal disegno "
+                "(fra una nuvola e il cappello, dentro un ricciolo) restano pieni: "
+                "attiva Edit regions e clicca dentro quelli da bucare.")
+        self._refresh_cutout_preview()
+
+    def _load_paint_mask(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open painted mask", self.last_opened_dir,
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tiff);;All Files (*.*)")
+        if not path:
+            return
+        bgr = cv2.imread(path)
+        if bgr is None:
+            QMessageBox.critical(self, "Decoder Error", "Maschera illeggibile.")
+            return
+        self.cutout_paint_mask = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+        # L'aspetto va detto, non corretto in silenzio: la maschera viene
+        # riscalata sulla griglia dell'arte, quindi se le proporzioni non
+        # coincidono il ritaglio esce stirato rispetto a quello che si e'
+        # dipinto — e la causa sarebbe invisibile.
+        src = self._cutout_source()
+        note = ""
+        if src is not None:
+            ar_m = self.cutout_paint_mask.shape[1] / self.cutout_paint_mask.shape[0]
+            ar_s = src.shape[1] / src.shape[0]
+            if abs(ar_m - ar_s) / ar_s > 0.02:
+                note = (f"  ⚠ Proporzioni diverse dall'immagine "
+                        f"({ar_m:.3f} vs {ar_s:.3f}): la maschera verra' stirata.")
+        self.lbl_status.setText(f"✅ Maschera caricata: {os.path.basename(path)}.{note}")
+        self._refresh_cutout_preview()
+
+    def _reset_cutout(self):
+        self.cutout_cut_seeds = []
+        self.cutout_keep_seeds = []
+        self.cutout_ring_xy = None
+        self._refresh_cutout_preview()
+        self.lbl_status.setText("↺ Regioni riportate all'automatismo.")
+
+    def _on_cutout_border_changed(self, v):
+        self.lbl_cutout_border.setText(f"Sticker border: {v/10.0:.1f} mm")
+        self._refresh_cutout_preview()
+
+    def _on_cutout_edit_toggled(self, checked):
+        """Entrando in modifica l'anteprima si accende per forza.
+
+        Non e' un vezzo: i click vanno letti sul raster di segmentazione, e
+        l'unica immagine mostrata a quella risoluzione e' l'anteprima del
+        ritaglio. Sull'originale a piena risoluzione le stesse coordinate
+        indicherebbero un'altra regione.
+        """
+        if checked:
+            self.btn_cutout_ring.setChecked(False)
+            self.btn_cutout_preview.setChecked(True)
+            self.btn_cutout_edit.setText("✂️ Editing… (click)")
+            self.lbl_status.setText(
+                "✂️ Clicca DENTRO una regione bianca per bucarla; ri-clicca per "
+                "richiuderla. Sul tratto nero non succede niente.")
+        else:
+            self.btn_cutout_edit.setText("✂️ Edit regions")
+
+    def _on_cutout_preview_toggled(self, checked):
+        if checked and self._cutout_source() is None:
+            self.btn_cutout_preview.setChecked(False)
+            return
+        if checked:
+            self.btn_spot_mockup.setChecked(False)
+            self.btn_std_mockup.setChecked(False)
+            self.btn_cover_preview.setChecked(False)
+            self.btn_cutout_preview.setText("👁 Back to Original")
+            self._do_refresh_cutout_preview()
+        else:
+            self.btn_cutout_edit.setChecked(False)
+            self.btn_cutout_ring.setChecked(False)
+            self.btn_cutout_preview.setText("👁 Cutout Preview")
+            self._update_viewport_mode(self.mode_selector.currentIndex())
+
+    def _refresh_cutout_preview(self):
+        """Come per Spot e Standard: le richieste ravvicinate si accorpano."""
+        if not self.btn_cutout_preview.isChecked():
+            return
+        if getattr(self, '_cutout_timer', None) is None:
+            self._cutout_timer = QTimer(self)
+            self._cutout_timer.setSingleShot(True)
+            self._cutout_timer.timeout.connect(self._do_refresh_cutout_preview)
+        self._cutout_timer.start(180)
+
+    def _do_refresh_cutout_preview(self):
+        """Giallo cio' che stampa, bianco il vuoto — la stessa lettura con cui
+        si guarda il disegno per decidere dove bucare."""
+        if not self.btn_cutout_preview.isChecked():
+            return
+        src = self._cutout_source()
+        if src is None:
+            return
+        res = self._compute_cutout_now()
+        if res is None or res.empty:
+            self.lbl_status.setText("⚠ Il ritaglio non lascia materiale.")
+            return
+
+        view = to_seg_raster(src, SEG_MAX_RES)
+        self.cutout_preview_array = overlay_preview(view, res.mask)
+        self.viewer.setImage(self.cutout_preview_array)
+
+        y0, y1, x0, x1 = res.bbox
+        long_mm = max(y1 - y0, x1 - x0) * res.pitch_mm
+        short_mm = min(y1 - y0, x1 - x0) * res.pitch_mm
+        msg = f"✂️ Pezzo {long_mm:.0f} × {short_mm:.0f} mm"
+        if res.n_pieces > 1:
+            msg += f"  ⚠ {res.n_pieces} tronconi: tenuto solo il maggiore"
+        if self.chk_cutout_ring.isChecked():
+            msg += ("  ⚠ occhiello staccato dal pezzo"
+                    if not res.ring_attached else "  · occhiello ok")
+        self.lbl_status.setText(msg)
+
+    def _cutout_click(self, x, y):
+        """Commuta la regione sotto il click, o piazza l'occhiello.
+
+        Ritorna True se il click e' stato consumato dal ritaglio.
+        """
+        if self.btn_cutout_ring.isChecked():
+            self.cutout_ring_xy = (int(x), int(y))
+            self.btn_cutout_ring.setChecked(False)
+            if not self.chk_cutout_ring.isChecked():
+                self.chk_cutout_ring.setChecked(True)   # riaccende l'anteprima
+            else:
+                self._refresh_cutout_preview()
+            self.lbl_status.setText(f"📍 Occhiello posizionato in ({x}, {y}).")
+            return True
+
+        if not self.btn_cutout_edit.isChecked():
+            return False
+
+        regions = self._cutout_regions_now()
+        if regions is None:
+            return True
+        lb = regions.region_at(x, y)
+        if lb <= 0:
+            self.lbl_status.setText(
+                "Quel punto e' tratto, non una regione: clicca dentro un'area bianca.")
+            return True
+
+        pt = (int(x), int(y))
+        # Lo stato di una regione e' l'automatismo piu' le correzioni, quindi
+        # per commutare si guarda dove sta ADESSO e si scrive il seme opposto,
+        # ripulendo l'altra lista: due semi contrastanti sulla stessa regione
+        # renderebbero il prossimo click imprevedibile.
+        cur_cut = bool(self._region_is_cut(regions, lb))
+        self.cutout_cut_seeds = [s for s in self.cutout_cut_seeds
+                                 if regions.region_at(*s) != lb]
+        self.cutout_keep_seeds = [s for s in self.cutout_keep_seeds
+                                  if regions.region_at(*s) != lb]
+        if cur_cut:
+            self.cutout_keep_seeds.append(pt)
+        else:
+            self.cutout_cut_seeds.append(pt)
+
+        self._do_refresh_cutout_preview()
+        return True
+
+    def _region_is_cut(self, regions, lb):
+        from engine.cutout_utils import resolve_cut_flags
+        flags = resolve_cut_flags(regions, self.cutout_cut_seeds, self.cutout_keep_seeds)
+        return flags[lb]
+
     def _get_rgb_filtered(self):
         """Filtro bilaterale RGB calcolato lazy alla prima richiesta (serve solo all'anteprima Topo)."""
         if getattr(self, 'img_rgb_filtered', None) is None:
@@ -654,6 +942,17 @@ class Manga3DAppController(MainWindowUI):
         self._ink_level = None
         self.btn_cover_preview.setChecked(False)
         self.btn_cover_preview.setEnabled(True)
+        # Il ritaglio e' fatto di scelte su QUESTA immagine: i semi di un'altra
+        # nominerebbero regioni che non esistono piu'.
+        self.btn_cutout_preview.setChecked(False)
+        self.btn_cutout_edit.setChecked(False)
+        self.btn_cutout_ring.setChecked(False)
+        self.cutout_cut_seeds = []
+        self.cutout_keep_seeds = []
+        self.cutout_paint_mask = None
+        self.cutout_ring_xy = None
+        self._invalidate_cutout_regions()
+        self.btn_cutout_preview.setEnabled(self.chk_cutout.isChecked())
         self._update_viewport_mode(self.mode_selector.currentIndex())
 
         h, w = img.shape
@@ -720,6 +1019,13 @@ class Manga3DAppController(MainWindowUI):
             btn.style().polish(btn)
 
     def on_pixel_clicked(self, x, y):
+        # Ramo ritaglio: ha la precedenza su tutto perche' e' l'unico che si
+        # arma esplicitamente (Edit regions / Place) e che mostra un'immagine
+        # sua, sulla quale un campionamento di colore leggerebbe il giallo
+        # dell'anteprima invece del disegno.
+        if self.chk_cutout.isChecked() and self._cutout_click(x, y):
+            return
+
         # Ramo Spot Color: campionamento accento (ha priorità quando armato)
         if (self.active_spot_swatch is not None
                 and getattr(self, 'img_rgb_original', None) is not None
@@ -907,6 +1213,16 @@ class Manga3DAppController(MainWindowUI):
             cover_engraved=(self.combo_cover_surface.currentIndex() == 0),
             cover_gray_levels=self.combo_cover_levels.currentIndex() + 2,
             include_bumper=self.chk_cover_bumper.isChecked(),
+            cutout_enabled=self.chk_cutout.isChecked(),
+            cutout_cut_seeds=list(self.cutout_cut_seeds),
+            cutout_keep_seeds=list(self.cutout_keep_seeds),
+            cutout_paint_mask=(self.cutout_paint_mask
+                               if self.combo_cutout_src.currentIndex() == 1 else None),
+            cutout_seg_res=SEG_MAX_RES,
+            cutout_border_mm=self.slider_cutout_border.value() / 10.0,
+            cutout_ring=self.chk_cutout_ring.isChecked(),
+            cutout_ring_xy=self.cutout_ring_xy,
+            cutout_ring_d_mm=self.spin_ring_d.value(),
             output_path=save_path_stl,
             output_path_3mf=save_path_3mf,
             source_image_name=base_name,
@@ -936,6 +1252,10 @@ class Manga3DAppController(MainWindowUI):
             self.btn_spot_mockup.setEnabled(self.img_filtered_array is not None)
             self.btn_std_mockup.setEnabled(self.img_filtered_array is not None)
             self.btn_cover_preview.setEnabled(self.img_filtered_array is not None)
+            # I controlli del ritaglio dipendono dalla spunta, e quelli a click
+            # anche dalla sorgente scelta: l'unlock generale li riaccenderebbe
+            # tutti, promettendo comandi che non hanno su cosa agire.
+            self._on_cutout_enabled_restore()
             # In Deckbox i parametri fisici restano bloccati anche dopo l'unlock
             self._on_mode_changed(self.mode_selector.currentIndex())
 
@@ -961,6 +1281,16 @@ class Manga3DAppController(MainWindowUI):
                 pass
             self.btn_generate.clicked.connect(self.generate_stl)
             self.btn_generate.setEnabled(True)
+
+    def _on_cutout_enabled_restore(self):
+        """Rimette i controlli del ritaglio nello stato che la spunta e la
+        sorgente impongono, dopo che l'unlock li ha riaccesi tutti."""
+        on = self.chk_cutout.isChecked()
+        for wdg in self.cutout_widgets:
+            wdg.setEnabled(on)
+        if on and self.combo_cutout_src.currentIndex() == 1:
+            self.btn_cutout_edit.setEnabled(False)
+            self.btn_cutout_reset.setEnabled(False)
 
     def cancel_generation(self):
         if hasattr(self, 'worker') and self.worker.isRunning():
@@ -1087,6 +1417,22 @@ class Manga3DAppController(MainWindowUI):
                 msg += f"🧷 Cover/Bumper (stampa in TPU) → {companion}\n"
             
         msg += f"\n⏱️ Time elapsed: {time_str}\n\n"
+
+        # Quello che il ritaglio ha dovuto decidere da solo. Sono scelte
+        # ragionevoli ma non ovvie, e restano invisibili nel file: se il
+        # disegno era in piu' tronconi ne e' uscito uno, e un occhiello
+        # staccato e' un anellino che si stacca alla prima tirata.
+        res = getattr(getattr(self, 'worker', None), 'result', None)
+        if self.chk_cutout.isChecked() and res is not None:
+            if getattr(res, 'cutout_n_pieces', 0) > 1:
+                msg += (f"⚠️  Il disegno era in {res.cutout_n_pieces} pezzi separati:\n"
+                        f"    ne è stato tenuto solo il più grande.\n"
+                        f"    Usa lo Sticker border per unirli, oppure\n"
+                        f"    tieni pieno un vuoto che fa da ponte.\n\n")
+            if self.chk_cutout_ring.isChecked() and not getattr(res, 'cutout_ring_attached', True):
+                msg += ("⚠️  L'occhiello non tocca il pezzo: riposizionalo\n"
+                        "    dentro il materiale con 📍 Place.\n\n")
+
         
         if path_3mf:
             msg += (
