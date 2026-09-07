@@ -402,7 +402,20 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
     # Quote dei cambi colore da iniettare nel 3MF: in topo vengono
     # ricalcolate sulle terrazze, altrimenti valgono quelle Standard
     export_changes_z = p.color_changes_z
-    export_slot_colors = None
+    # I colori che il 3MF dichiara per ogni cambio bobina. In Topo e Spot li
+    # sostituisce la palette vera, poco piu' sotto; in Standard sono i toni che
+    # la modalita' stampa davvero, dal piu' chiaro al nero.
+    #
+    # Erano una lista fissa da cui si prendevano i primi N: con due cambi
+    # finiva in grigio scuro e **il nero non compariva mai**, mentre in un
+    # rilievo l'inchiostro e' sempre l'ultima bobina. Ora vengono dai toni
+    # della modalita', quindi il colore che lo slicer mostra accanto al cambio
+    # e' quello che quella banda stampera'.
+    # La palette intera, dalla base all'inchiostro: da qui escono sia i colori
+    # dei cambi sia l'elenco dei filamenti del progetto, che deve contenere
+    # quelli che si stampano e nessun altro.
+    export_palette = ['#%02x%02x%02x' % (t, t, t) for t in reversed(tone_targets(p))]
+    export_slot_colors = export_palette[1:]
 
     plate_mask = None
     if p.is_cover_mode and p.cover_preset:
@@ -434,7 +447,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
             palette = palette[::-1]
             idx_map = (len(palette) - 1) - idx_map
         img_work = np.array(palette, dtype=np.uint8)[idx_map]
-        export_slot_colors = ['#%02x%02x%02x' % tuple(c) for c in palette[1:]]
+        export_palette = ['#%02x%02x%02x' % tuple(c) for c in palette]
+        export_slot_colors = export_palette[1:]
         # la plate segue la pipeline Topographic (terrazze + snap)
         is_topo = True
         topo_colors = palette
@@ -449,7 +463,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
             white_clip=p.white_clip, black_clip=p.black_clip)
         img_work = np.array(palette, dtype=np.uint8)[idx_map]
         # Nei metadata 3MF finiscono i colori reali della palette (non i grigi)
-        export_slot_colors = ['#%02x%02x%02x' % tuple(c) for c in palette[1:]]
+        export_palette = ['#%02x%02x%02x' % tuple(c) for c in palette]
+        export_slot_colors = export_palette[1:]
         # Da qui in poi la pipeline coincide con la Topographic
         is_topo = True
         topo_colors = palette
@@ -592,7 +607,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
             result.stl_path = p.output_path
         if p.output_path_3mf:
             export_3mf(mesh, p.output_path_3mf, export_changes_z,
-                       slot_colors=export_slot_colors)
+                       slot_colors=export_slot_colors,
+                       palette_hex=export_palette)
             result.mf3_path = p.output_path_3mf
 
         if p.is_cover_mode and p.include_bumper and p.cover_preset:
