@@ -223,49 +223,13 @@ class MainWindowUI(QMainWindow):
         self.group_cover.setVisible(False)
         right_layout.addWidget(self.group_cover)
 
-        # SPOT COLOR PANEL (Hidden by default)
-        self.group_spot = QGroupBox("Spot Color Settings")
-        spot_layout = QVBoxLayout()
-
-        self.combo_spot_naccents = QComboBox()
-        self.combo_spot_naccents.addItems(["1 Accent Color", "2 Accent Colors"])
-        spot_layout.addWidget(self.combo_spot_naccents)
-
-        self.btn_spot_auto = QPushButton("🤖 Auto-Detect Accents")
-        spot_layout.addWidget(self.btn_spot_auto)
-
-        self.lbl_spot_info = QLabel("Click an accent below, then click on the image to sample its color.")
-        self.lbl_spot_info.setWordWrap(True)
-        spot_layout.addWidget(self.lbl_spot_info)
-
-        self.spot_swatches = []
-        for i in range(2):
-            btn = QPushButton(f"Accent {i+1}: [ -- ]")
-            btn.setProperty("class", "swatch")
-            spot_layout.addWidget(btn)
-            self.spot_swatches.append(btn)
-
-        self.lbl_spot_coverage = QLabel("Accent Coverage: 40%")
-        self.slider_spot_coverage = QSlider(Qt.Orientation.Horizontal)
-        self.slider_spot_coverage.setRange(0, 100)
-        self.slider_spot_coverage.setValue(40)
-        self.slider_spot_coverage.setToolTip("Low = only vivid pixels become accent. High = muted shades too.")
-        spot_layout.addWidget(self.lbl_spot_coverage)
-        spot_layout.addWidget(self.slider_spot_coverage)
-
-        self.btn_spot_mockup = QPushButton("👁 Mockup Preview")
-        self.btn_spot_mockup.setCheckable(True)
-        self.btn_spot_mockup.setEnabled(False)
-        spot_layout.addWidget(self.btn_spot_mockup)
-
-        self.group_spot.setLayout(spot_layout)
-        self.group_spot.setVisible(False)
-        right_layout.addWidget(self.group_spot)
-
-        # Il secondo swatch accento compare solo scegliendo "2 Accent Colors"
-        self.spot_swatches[1].setVisible(False)
-        self.combo_spot_naccents.currentIndexChanged.connect(
-            lambda i: self.spot_swatches[1].setVisible(i == 1))
+        # --- ordine dei riquadri ---
+        # Il pannello di una modalita' sta SOPRA i pannelli che accende. La
+        # cover e il portachiavi scelgono la finitura, e la finitura decide se
+        # compaiono gli accenti Spot (sotto) o gli swatch e le quote Standard
+        # (piu' sotto ancora): con il selettore sotto al riquadro che governa,
+        # si sceglie una cosa guardandone un'altra che e' gia' passata.
+        # Vale anche per il selettore di modalita', che sta in cima a tutto.
 
         # KEYCHAIN / CUTOUT PANEL (Hidden by default)
         # E' una modalita' come le altre, quindi il pannello si vede solo
@@ -372,6 +336,50 @@ class MainWindowUI(QMainWindow):
             lambda i: self.btn_cutout_paint.setVisible(i == 1))
         self.combo_keychain_finish.currentIndexChanged.connect(
             lambda _: self._on_mode_changed(self.mode_selector.currentIndex()))
+
+        # SPOT COLOR PANEL (Hidden by default)
+        self.group_spot = QGroupBox("Spot Color Settings")
+        spot_layout = QVBoxLayout()
+
+        self.combo_spot_naccents = QComboBox()
+        self.combo_spot_naccents.addItems(["1 Accent Color", "2 Accent Colors"])
+        spot_layout.addWidget(self.combo_spot_naccents)
+
+        self.btn_spot_auto = QPushButton("🤖 Auto-Detect Accents")
+        spot_layout.addWidget(self.btn_spot_auto)
+
+        self.lbl_spot_info = QLabel("Click an accent below, then click on the image to sample its color.")
+        self.lbl_spot_info.setWordWrap(True)
+        spot_layout.addWidget(self.lbl_spot_info)
+
+        self.spot_swatches = []
+        for i in range(2):
+            btn = QPushButton(f"Accent {i+1}: [ -- ]")
+            btn.setProperty("class", "swatch")
+            spot_layout.addWidget(btn)
+            self.spot_swatches.append(btn)
+
+        self.lbl_spot_coverage = QLabel("Accent Coverage: 40%")
+        self.slider_spot_coverage = QSlider(Qt.Orientation.Horizontal)
+        self.slider_spot_coverage.setRange(0, 100)
+        self.slider_spot_coverage.setValue(40)
+        self.slider_spot_coverage.setToolTip("Low = only vivid pixels become accent. High = muted shades too.")
+        spot_layout.addWidget(self.lbl_spot_coverage)
+        spot_layout.addWidget(self.slider_spot_coverage)
+
+        self.btn_spot_mockup = QPushButton("👁 Mockup Preview")
+        self.btn_spot_mockup.setCheckable(True)
+        self.btn_spot_mockup.setEnabled(False)
+        spot_layout.addWidget(self.btn_spot_mockup)
+
+        self.group_spot.setLayout(spot_layout)
+        self.group_spot.setVisible(False)
+        right_layout.addWidget(self.group_spot)
+
+        # Il secondo swatch accento compare solo scegliendo "2 Accent Colors"
+        self.spot_swatches[1].setVisible(False)
+        self.combo_spot_naccents.currentIndexChanged.connect(
+            lambda i: self.spot_swatches[1].setVisible(i == 1))
 
         # SWATCH PANEL
         self.group_swatch = QGroupBox("Color Picking (Click to calibrate)")

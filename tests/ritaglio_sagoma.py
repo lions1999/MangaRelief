@@ -374,6 +374,34 @@ check("...ma la maschera dipinta resta senza click",
       not win.btn_cutout_edit.isEnabled())
 win.combo_cutout_src.setCurrentIndex(0)
 
+# L'ordine dei riquadri, che e' una proprieta' del pannello e non una
+# questione di gusto: il selettore della finitura decide se compaiono gli
+# accenti Spot o gli swatch Standard, quindi deve stare SOPRA di loro. Con il
+# selettore sotto, si sceglie una cosa guardando un riquadro gia' passato.
+# E' l'invariante che si rompe da sola la prossima volta che qualcuno aggiunge
+# un pannello in fondo a initUI — come e' successo a questo.
+colonna = win.group_spot.parentWidget().layout()
+
+
+def posizione(g):
+    return colonna.indexOf(g)
+
+
+check("il pannello portachiavi sta sopra gli accenti Spot",
+      posizione(win.group_keychain) < posizione(win.group_spot),
+      f"keychain={posizione(win.group_keychain)} spot={posizione(win.group_spot)}")
+check("...e sopra gli swatch e le quote Standard",
+      posizione(win.group_keychain) < posizione(win.group_swatch)
+      and posizione(win.group_keychain) < posizione(win.group_z))
+check("la stessa regola vale per la cover, che ha lo stesso selettore",
+      posizione(win.group_cover) < posizione(win.group_spot)
+      and posizione(win.group_cover) < posizione(win.group_swatch))
+check("e il selettore di modalita' sta in cima a tutti",
+      posizione(win.mode_selector) < min(posizione(g) for g in (
+          win.group_topo, win.group_deckbox, win.group_cover,
+          win.group_keychain, win.group_spot, win.group_swatch)))
+
+
 # Il nome del file dice da quale modalita' viene: nella cartella output/ i
 # file di modalita' diverse finiscono fianco a fianco, e "<nome>_3D" da solo
 # non distingue un pannello da un portachiavi dello stesso disegno.
