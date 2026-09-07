@@ -260,8 +260,8 @@ class Manga3DAppController(MainWindowUI):
         self.viewer.setImage(self.cover_preview_array)
         preset = self._current_phone_preset()
         self.lbl_status.setText(
-            f"👁 Plate {self.combo_phone_model.currentText()}: trascina con gli slider, "
-            f"i fori camera sono le zone scure.")
+            f"👁 Plate {self.combo_phone_model.currentText()}: drag it with the sliders, "
+            f"the dark areas are the camera holes.")
 
     # ------------------------------------------------------------------
     # SPOT COLOR — picking, auto-detect, mockup
@@ -914,7 +914,7 @@ class Manga3DAppController(MainWindowUI):
 
         self.last_opened_dir = os.path.dirname(file_path)
         self.loaded_image_path = file_path
-        self.lbl_status.setText("Caricamento immagine...")
+        self.lbl_status.setText("Loading image...")
         QApplication.processEvents()
         
         # Load RGB first to avoid redundant conversions
@@ -1122,7 +1122,7 @@ class Manga3DAppController(MainWindowUI):
 
         is_cover = (self.mode_selector.currentIndex() == 4)
         if is_cover and self._current_phone_preset() is None:
-            QMessageBox.warning(self, "Phone Cover", "Seleziona un modello di telefono.")
+            QMessageBox.warning(self, "Phone Cover", "Please select a phone model.")
             return
 
         export_3mf = self.chk_export_3mf.isChecked()
@@ -1135,8 +1135,19 @@ class Manga3DAppController(MainWindowUI):
         # --- Auto-compute output paths (no user prompt) ---
         base_dir = os.path.dirname(self.loaded_image_path)
         base_name = os.path.splitext(os.path.basename(self.loaded_image_path))[0]
-        # In modalità cover i file si chiamano cover_plate_<nome> (+ cover_bumper_<nome>)
-        file_stem = f"cover_plate_{base_name}" if is_cover else f"{base_name}_3D"
+        # Il nome dice da quale modalità viene il file, perché nella cartella
+        # output/ finiscono fianco a fianco e "<nome>_3D" da solo non basta a
+        # distinguere un pannello da un portachiavi dello stesso disegno.
+        # Prefisso solo dove la modalità produce PIÙ file che vanno tenuti
+        # insieme (cover_plate_ / cover_bumper_, full_deckbox_): lì raggruppa
+        # per ruolo. Il portachiavi ne produce uno, quindi segue i pannelli e
+        # va in coda.
+        if is_cover:
+            file_stem = f"cover_plate_{base_name}"
+        elif self._is_keychain():
+            file_stem = f"{base_name}_keychain"
+        else:
+            file_stem = f"{base_name}_3D"
 
         save_path_stl = None
         if export_stl:
@@ -1428,7 +1439,7 @@ class Manga3DAppController(MainWindowUI):
             if (self.mode_selector.currentIndex() == 4 and self.chk_cover_bumper.isChecked()
                     and (stl_path or path_3mf)):
                 companion = MeshWorker.companion_path_for(stl_path or path_3mf)
-                msg += f"🧷 Cover/Bumper (stampa in TPU) → {companion}\n"
+                msg += f"🧷 Cover/Bumper (print in TPU) → {companion}\n"
             
         msg += f"\n⏱️ Time elapsed: {time_str}\n\n"
 

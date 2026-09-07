@@ -374,6 +374,53 @@ check("...ma la maschera dipinta resta senza click",
       not win.btn_cutout_edit.isEnabled())
 win.combo_cutout_src.setCurrentIndex(0)
 
+# Il nome del file dice da quale modalita' viene: nella cartella output/ i
+# file di modalita' diverse finiscono fianco a fianco, e "<nome>_3D" da solo
+# non distingue un pannello da un portachiavi dello stesso disegno.
+from PyQt6.QtCore import QObject, pyqtSignal
+import manga_to_3d as m3d
+
+
+class WorkerFinto(QObject):
+    """Intercetta i parametri senza far partire nulla: qui interessa come si
+    chiamano i file, non cosa ci finisce dentro."""
+    progress = pyqtSignal(int, str)
+    finished_ok = pyqtSignal(str, str)
+    finished_err = pyqtSignal(str)
+    ultimo = None
+
+    def __init__(self, params, image):
+        super().__init__()
+        WorkerFinto.ultimo = params
+
+    def start(self):
+        pass
+
+
+def stem_generato():
+    vero, m3d.MeshWorker = m3d.MeshWorker, WorkerFinto
+    try:
+        win.generate_stl()
+    finally:
+        m3d.MeshWorker = vero
+    return os.path.splitext(os.path.basename(WorkerFinto.ultimo.output_path))[0]
+
+
+win.chk_export_stl.setChecked(True)
+win.chk_export_3mf.setChecked(False)
+
+win.mode_selector.setCurrentIndex(KEYCHAIN)
+st_key = stem_generato()
+check("il file del portachiavi ha 'keychain' nel nome",
+      "keychain" in st_key and st_key.startswith("cappello"), st_key)
+
+win.mode_selector.setCurrentIndex(0)          # Standard
+st_std = stem_generato()
+check("le altre modalita' non sono state toccate", st_std.endswith("_3D"), st_std)
+check("e i due nomi sono diversi", st_key != st_std, f"{st_key} / {st_std}")
+win.mode_selector.setCurrentIndex(KEYCHAIN)
+
+
 # Caricare un'altra immagine deve azzerare i semi: nominano regioni di prima.
 win.btn_cutout_edit.setChecked(True)
 win.on_pixel_clicked(*P_VUOTO)

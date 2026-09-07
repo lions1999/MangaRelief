@@ -170,18 +170,18 @@ class MainWindowUI(QMainWindow):
         cover_layout.addRow("Phone Model:", self.combo_phone_model)
 
         self.combo_cover_finish = QComboBox()
-        self.combo_cover_finish.addItems(["B/N (Standard)", "Spot Color"])
+        self.combo_cover_finish.addItems(["B&W (Standard)", "Spot Color"])
         cover_layout.addRow("Finish:", self.combo_cover_finish)
 
         self.combo_cover_surface = QComboBox()
-        self.combo_cover_surface.addItems(["Engraved (liscia in tasca)", "Raised (rilievo)"])
-        self.combo_cover_surface.setToolTip("Engraved: superficie esterna piana, arte incisa sotto. Raised: arte in rilievo come i pannelli.")
+        self.combo_cover_surface.addItems(["Engraved (smooth in the pocket)", "Raised (relief)"])
+        self.combo_cover_surface.setToolTip("Engraved: flat outer surface, artwork carved underneath. Raised: artwork in relief, like the panels.")
         cover_layout.addRow("Surface:", self.combo_cover_surface)
 
         self.combo_cover_levels = QComboBox()
         self.combo_cover_levels.addItems(["2 (B/N puro)", "3 (consigliato)", "4 (max dettaglio)"])
         self.combo_cover_levels.setCurrentIndex(1)
-        self.combo_cover_levels.setToolTip("Livelli di grigio quantizzati: più livelli = più mezzitoni/retini preservati.")
+        self.combo_cover_levels.setToolTip("Quantised grey levels: more levels = more halftones and screentones preserved.")
         cover_layout.addRow("Gray Levels:", self.combo_cover_levels)
 
         self.lbl_cover_scale = QLabel("Zoom: 100%")
@@ -190,7 +190,7 @@ class MainWindowUI(QMainWindow):
         # rimpicciolisce (bordi bianchi base) per posizionarla più facilmente
         self.slider_cover_scale.setRange(50, 300)
         self.slider_cover_scale.setValue(100)
-        self.slider_cover_scale.setToolTip("100% = fill esatto. <100% rimpicciolisce l'immagine (bordi bianchi), >100% zooma dentro.")
+        self.slider_cover_scale.setToolTip("100% = exact fill. <100% shrinks the image (white margins), >100% zooms in.")
         cover_layout.addRow(self.lbl_cover_scale, self.slider_cover_scale)
 
         self.lbl_cover_offx = QLabel("Offset X: 0 mm")
@@ -211,7 +211,7 @@ class MainWindowUI(QMainWindow):
 
         self.chk_cover_bumper = QCheckBox("Generate TPU bumper too (separate STL)")
         self.chk_cover_bumper.setChecked(True)
-        self.chk_cover_bumper.setToolTip("Deseleziona se hai già stampato il bumper: verrà generata solo la plate.")
+        self.chk_cover_bumper.setToolTip("Uncheck if you have already printed the bumper: only the plate will be generated.")
         cover_layout.addRow(self.chk_cover_bumper)
 
         self.btn_cover_preview = QPushButton("👁 Plate Preview")
