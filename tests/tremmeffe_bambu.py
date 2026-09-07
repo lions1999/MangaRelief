@@ -90,9 +90,20 @@ for colori in (2, 3, 4):
     check(f"{n}: project_settings non e' vuoto", len(cfg) > 0)
     check(f"{n}: c'e' nozzle_diameter, la chiave senza cui non apre",
           cfg.get("nozzle_diameter") == ["0.4"], cfg.get("nozzle_diameter"))
-    check(f"{n}: cinque chiavi, nessuna impostazione altrui",
-          set(cfg) == {"version", "from", "name", "nozzle_diameter", "filament_colour"},
+    # Quello che si dichiara qui sostituisce il profilo di chi apre il file, non
+    # ci si aggiunge: ogni chiave in piu' e' un'impostazione imposta a lui.
+    # Quindi solo quelle che riguardano *questo* oggetto.
+    check(f"{n}: nessuna impostazione di stampa altrui",
+          set(cfg) == {"version", "from", "name", "nozzle_diameter", "filament_colour",
+                       "layer_height", "initial_layer_print_height", "skirt_loops"},
           sorted(cfg))
+    check(f"{n}: l'altezza layer e' quella su cui sono calcolate le quote",
+          cfg["layer_height"] == "0.2" and cfg["initial_layer_print_height"] == "0.2",
+          (cfg["layer_height"], cfg["initial_layer_print_height"]))
+    # Un giro di perimetro sul primo layer, in filamento 1: su una lastra larga
+    # non serve, e a occhio sembra un bordo del disegno. Era il valore di
+    # fabbrica, ed e' cosi' che si e' scoperto tutto il resto.
+    check(f"{n}: niente skirt", cfg["skirt_loops"] == "0", cfg["skirt_loops"])
 
     # --- i filamenti: quelli che si stampano, in ordine di stampa
     palette = cfg["filament_colour"]

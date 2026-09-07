@@ -608,7 +608,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
         if p.output_path_3mf:
             export_3mf(mesh, p.output_path_3mf, export_changes_z,
                        slot_colors=export_slot_colors,
-                       palette_hex=export_palette)
+                       palette_hex=export_palette,
+                       layer_height=p.layer_height)
             result.mf3_path = p.output_path_3mf
 
         if p.is_cover_mode and p.include_bumper and p.cover_preset:

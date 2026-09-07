@@ -369,6 +369,23 @@ _APPLICATION = "BambuStudio-02.00.00.00"
 _PROJECT_VERSION = "02.00.00.00"
 _DEFAULT_NOZZLE = "0.4"
 
+# Quello che dichiariamo qui non si aggiunge al profilo di chi apre il file:
+# lo sostituisce. Bambu costruisce un processo nuovo, intitolato al nostro
+# file, e ogni chiave che non nominiamo prende il valore di fabbrica — non
+# quello del profilo scelto. Misurato confrontando due file affettati dalla
+# stessa persona: 268 impostazioni su 557 diverse, fra cui l'ugello a 200 °C
+# invece di 220 e il muro esterno a 60 mm/s invece di 200.
+#
+# Non c'e' modo di dire "tieni il tuo processo": un progetto ne definisce uno
+# per forza. Quindi si dichiara il minimo che riguarda *questo* oggetto e si
+# dice a chi scarica di scegliere il proprio profilo — un menu a tendina, che
+# rimette a posto tutte e 268 in un colpo.
+#
+# skirt_loops a zero perche' e' l'unico valore di fabbrica che si vede a occhio
+# nudo: un giro di perimetro sul primo layer, in filamento 1, che su una lastra
+# larga non serve a niente e sembra un bordo del disegno.
+_SKIRT_LOOPS = "0"
+
 _CONTENT_TYPES = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -482,7 +499,7 @@ _CUSTOM_GCODE_TPL = """\
 </custom_gcodes_per_layer>"""
 
 def export_3mf(mesh, output_path_3mf, color_changes_z, slot_colors=None,
-               object_name="geometry_0", palette_hex=None):
+               object_name="geometry_0", palette_hex=None, layer_height=0.2):
     """Scrive un 3MF che Bambu Studio apre come progetto, non come geometria.
 
     La geometria la serializza trimesh — non c'e' ragione di riscrivere un
@@ -556,12 +573,18 @@ def export_3mf(mesh, output_path_3mf, color_changes_z, slot_colors=None,
     palette = list(palette_hex) if palette_hex else (
         ["#FFFFFF"] + [slot_colors[i] if i < len(slot_colors) else "#000000"
                        for i in range(len(valid_z))])
+    # L'altezza layer la dichiariamo perche' e' *nostra*: le quote dei cambi
+    # colore sono calcolate su quella, e con un valore diverso cadrebbero in
+    # mezzo a un layer invece che sul suo confine.
     project_settings = json.dumps({
         "version": _PROJECT_VERSION,
         "from": "project",
         "name": "project_settings",
         "nozzle_diameter": [_DEFAULT_NOZZLE],
         "filament_colour": palette,
+        "layer_height": str(layer_height),
+        "initial_layer_print_height": str(layer_height),
+        "skirt_loops": _SKIRT_LOOPS,
     }, indent=4)
 
 
