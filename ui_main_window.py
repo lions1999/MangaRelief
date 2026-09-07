@@ -279,10 +279,10 @@ class MainWindowUI(QMainWindow):
         # decide la SAGOMA, non i colori, e come colorare l'arte resta da
         # scegliere.
         self.combo_keychain_finish = QComboBox()
-        self.combo_keychain_finish.addItems(["Spot Color", "B/N (Standard)"])
+        self.combo_keychain_finish.addItems(["Spot Color", "B&W (Standard)"])
         self.combo_keychain_finish.setToolTip(
-            "Spot Color: base bianca + accenti + nero.\n"
-            "B/N: la posterizzazione della modalita' Standard.")
+            "Spot Color: white base + accents + black.\n"
+            "B&W: the Standard mode posterisation.")
         cut_form_top = QFormLayout()
         cut_form_top.addRow("Finish:", self.combo_keychain_finish)
         cut_layout.addLayout(cut_form_top)
@@ -290,9 +290,9 @@ class MainWindowUI(QMainWindow):
         self.combo_cutout_src = QComboBox()
         self.combo_cutout_src.addItems(["Auto + click (regions)", "Painted mask (file)"])
         self.combo_cutout_src.setToolTip(
-            "Auto: e' vuoto solo cio' che tocca il bordo dell'immagine, il resto\n"
-            "si corregge a click. Painted mask: una seconda immagine in cui hai\n"
-            "colorato le parti da stampare e lasciato bianco il vuoto.")
+            "Auto: only what touches the image border is void; you correct the\n"
+            "rest by clicking. Painted mask: a second image where you coloured\n"
+            "the parts to print and left the voids white.")
         cut_layout.addWidget(self.combo_cutout_src)
 
         self.btn_cutout_paint = QPushButton("📂 Load painted mask…")
@@ -302,16 +302,16 @@ class MainWindowUI(QMainWindow):
         # Il testo che spiega *perche'* servono i click: senza, la modalita'
         # sembra rotta ogni volta che l'automatismo tiene un vuoto racchiuso.
         self.lbl_cutout_info = QLabel(
-            "Auto toglie solo lo sfondo esterno. I vuoti chiusi dal disegno "
-            "(fra una nuvola e il cappello, dentro un ricciolo) restano pieni: "
-            "attiva Edit regions e clicca dentro quelli da bucare.")
+            "Auto removes the outer background only. Voids enclosed by the "
+            "drawing (between a cloud and the hat, inside a curl) stay solid: "
+            "turn on Edit regions and click inside the ones to punch out.")
         self.lbl_cutout_info.setWordWrap(True)
         cut_layout.addWidget(self.lbl_cutout_info)
 
         edit_row = QHBoxLayout()
         self.btn_cutout_edit = QPushButton("✂️ Edit regions")
         self.btn_cutout_edit.setCheckable(True)
-        self.btn_cutout_edit.setToolTip("Clicca dentro una regione per bucarla; ri-clicca per richiuderla.")
+        self.btn_cutout_edit.setToolTip("Click inside a region to punch it out; click again to fill it back.")
         self.btn_cutout_reset = QPushButton("↺ Reset")
         self.btn_cutout_reset.setFixedWidth(70)
         edit_row.addWidget(self.btn_cutout_edit)
@@ -325,23 +325,29 @@ class MainWindowUI(QMainWindow):
         self.slider_cutout_border.setRange(0, 30)   # decimi di mm
         self.slider_cutout_border.setValue(0)
         self.slider_cutout_border.setToolTip(
-            "Allarga la sagoma verso l'esterno: il bordino bianco degli sticker.\n"
-            "Ingrossa anche i tratti sottili che da soli non stamperebbero.")
+            "Grows the silhouette outwards: the white rim of a sticker.\n"
+            "Also thickens thin strokes that would not print on their own.")
         cut_form.addRow(self.lbl_cutout_border, self.slider_cutout_border)
 
+        # Il diametro va etichettato e gli va lasciato spazio: a 70 px il
+        # valore finiva sotto le frecce, cioe' il campo non diceva ne' quanto
+        # vale ne' cosa misura.
         ring_row = QHBoxLayout()
         self.chk_cutout_ring = QCheckBox("Keyring hole")
         self.btn_cutout_ring = QPushButton("📍 Place")
         self.btn_cutout_ring.setCheckable(True)
-        self.btn_cutout_ring.setFixedWidth(80)
+        self.btn_cutout_ring.setMinimumWidth(80)
+        self.lbl_ring_d = QLabel("Ø mm:")
         self.spin_ring_d = QDoubleSpinBox()
         self.spin_ring_d.setRange(1.5, 12.0)
         self.spin_ring_d.setValue(4.0)
         self.spin_ring_d.setSingleStep(0.5)
-        self.spin_ring_d.setFixedWidth(70)
-        self.spin_ring_d.setToolTip("Diametro del foro per l'anellino (mm).")
+        self.spin_ring_d.setMinimumWidth(80)
+        self.spin_ring_d.setToolTip("Diameter of the keyring hole, in mm.")
         ring_row.addWidget(self.chk_cutout_ring)
+        ring_row.addStretch()
         ring_row.addWidget(self.btn_cutout_ring)
+        ring_row.addWidget(self.lbl_ring_d)
         ring_row.addWidget(self.spin_ring_d)
         cut_form.addRow(ring_row)
 

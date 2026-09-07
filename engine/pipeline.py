@@ -464,8 +464,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
             ring_d_mm=p.cutout_ring_d_mm, ring_rim_mm=p.cutout_ring_rim_mm)
         if cut.empty or cut.bbox is None:
             raise ValueError(
-                "Il ritaglio non lascia materiale: controlla le regioni "
-                "marcate come vuoto, o la maschera dipinta.")
+                "The cutout leaves no material: check the regions marked as "
+                "void, or the painted mask.")
         cutout_mask = crop(cut.mask, cut.bbox)
         img_work = _crop_source_to(img_work, cut.bbox, cut.mask.shape[:2])
         cutout_pieces, cutout_ring_ok = cut.n_pieces, cut.ring_attached

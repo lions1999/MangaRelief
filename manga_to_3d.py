@@ -595,14 +595,13 @@ class Manga3DAppController(MainWindowUI):
         if not auto:
             self.btn_cutout_edit.setChecked(False)
             self.lbl_cutout_info.setText(
-                "Maschera dipinta: e' materiale tutto cio' che non e' bianco, "
-                "ed e' vuoto ogni bianco — esterno e racchiuso allo stesso modo. "
-                "Nessun click da fare.")
+                "Painted mask: anything that is not white is material, and every "
+                "white area is a void — outer and enclosed alike. No clicks needed.")
         else:
             self.lbl_cutout_info.setText(
-                "Auto toglie solo lo sfondo esterno. I vuoti chiusi dal disegno "
-                "(fra una nuvola e il cappello, dentro un ricciolo) restano pieni: "
-                "attiva Edit regions e clicca dentro quelli da bucare.")
+                "Auto removes the outer background only. Voids enclosed by the "
+                "drawing (between a cloud and the hat, inside a curl) stay solid: "
+                "turn on Edit regions and click inside the ones to punch out.")
         self._refresh_cutout_preview()
 
     def _load_paint_mask(self):
@@ -613,7 +612,7 @@ class Manga3DAppController(MainWindowUI):
             return
         bgr = cv2.imread(path)
         if bgr is None:
-            QMessageBox.critical(self, "Decoder Error", "Maschera illeggibile.")
+            QMessageBox.critical(self, "Decoder Error", "Unreadable mask file.")
             return
         self.cutout_paint_mask = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
@@ -627,9 +626,9 @@ class Manga3DAppController(MainWindowUI):
             ar_m = self.cutout_paint_mask.shape[1] / self.cutout_paint_mask.shape[0]
             ar_s = src.shape[1] / src.shape[0]
             if abs(ar_m - ar_s) / ar_s > 0.02:
-                note = (f"  ⚠ Proporzioni diverse dall'immagine "
-                        f"({ar_m:.3f} vs {ar_s:.3f}): la maschera verra' stirata.")
-        self.lbl_status.setText(f"✅ Maschera caricata: {os.path.basename(path)}.{note}")
+                note = (f"  ⚠ Aspect ratio differs from the image "
+                        f"({ar_m:.3f} vs {ar_s:.3f}): the mask will be stretched.")
+        self.lbl_status.setText(f"✅ Mask loaded: {os.path.basename(path)}.{note}")
         self._refresh_cutout_preview()
 
     def _reset_cutout(self):
@@ -637,7 +636,7 @@ class Manga3DAppController(MainWindowUI):
         self.cutout_keep_seeds = []
         self.cutout_ring_xy = None
         self._refresh_cutout_preview()
-        self.lbl_status.setText("↺ Regioni riportate all'automatismo.")
+        self.lbl_status.setText("↺ Regions back to the automatic rule.")
 
     def _on_cutout_border_changed(self, v):
         self.lbl_cutout_border.setText(f"Sticker border: {v/10.0:.1f} mm")
@@ -656,8 +655,8 @@ class Manga3DAppController(MainWindowUI):
             self.btn_cutout_preview.setChecked(True)
             self.btn_cutout_edit.setText("✂️ Editing… (click)")
             self.lbl_status.setText(
-                "✂️ Clicca DENTRO una regione bianca per bucarla; ri-clicca per "
-                "richiuderla. Sul tratto nero non succede niente.")
+                "✂️ Click INSIDE a white region to punch it out; click again to "
+                "fill it back. Clicking on the linework does nothing.")
         else:
             self.btn_cutout_edit.setText("✂️ Edit regions")
 
@@ -697,7 +696,7 @@ class Manga3DAppController(MainWindowUI):
             return
         res = self._compute_cutout_now()
         if res is None or res.empty:
-            self.lbl_status.setText("⚠ Il ritaglio non lascia materiale.")
+            self.lbl_status.setText("⚠ The cutout leaves no material.")
             return
 
         view = to_seg_raster(src, SEG_MAX_RES)
@@ -707,12 +706,12 @@ class Manga3DAppController(MainWindowUI):
         y0, y1, x0, x1 = res.bbox
         long_mm = max(y1 - y0, x1 - x0) * res.pitch_mm
         short_mm = min(y1 - y0, x1 - x0) * res.pitch_mm
-        msg = f"✂️ Pezzo {long_mm:.0f} × {short_mm:.0f} mm"
+        msg = f"✂️ Piece {long_mm:.0f} × {short_mm:.0f} mm"
         if res.n_pieces > 1:
-            msg += f"  ⚠ {res.n_pieces} tronconi: tenuto solo il maggiore"
+            msg += f"  ⚠ {res.n_pieces} separate pieces: only the largest kept"
         if self.chk_cutout_ring.isChecked():
-            msg += ("  ⚠ occhiello staccato dal pezzo"
-                    if not res.ring_attached else "  · occhiello ok")
+            msg += ("  ⚠ keyring hole not attached to the piece"
+                    if not res.ring_attached else "  · keyring hole ok")
         self.lbl_status.setText(msg)
 
     def _cutout_click(self, x, y):
@@ -727,7 +726,7 @@ class Manga3DAppController(MainWindowUI):
                 self.chk_cutout_ring.setChecked(True)   # riaccende l'anteprima
             else:
                 self._refresh_cutout_preview()
-            self.lbl_status.setText(f"📍 Occhiello posizionato in ({x}, {y}).")
+            self.lbl_status.setText(f"📍 Keyring hole placed at ({x}, {y}).")
             return True
 
         if not self.btn_cutout_edit.isChecked():
@@ -739,7 +738,7 @@ class Manga3DAppController(MainWindowUI):
         lb = regions.region_at(x, y)
         if lb <= 0:
             self.lbl_status.setText(
-                "Quel punto e' tratto, non una regione: clicca dentro un'area bianca.")
+                "That point is linework, not a region: click inside a white area.")
             return True
 
         pt = (int(x), int(y))
@@ -1440,13 +1439,13 @@ class Manga3DAppController(MainWindowUI):
         res = getattr(getattr(self, 'worker', None), 'result', None)
         if self._is_keychain() and res is not None:
             if getattr(res, 'cutout_n_pieces', 0) > 1:
-                msg += (f"⚠️  Il disegno era in {res.cutout_n_pieces} pezzi separati:\n"
-                        f"    ne è stato tenuto solo il più grande.\n"
-                        f"    Usa lo Sticker border per unirli, oppure\n"
-                        f"    tieni pieno un vuoto che fa da ponte.\n\n")
+                msg += (f"⚠️  The drawing was in {res.cutout_n_pieces} separate pieces:\n"
+                        f"    only the largest one was kept.\n"
+                        f"    Use the Sticker border to join them, or keep\n"
+                        f"    a void solid so that it bridges them.\n\n")
             if self.chk_cutout_ring.isChecked() and not getattr(res, 'cutout_ring_attached', True):
-                msg += ("⚠️  L'occhiello non tocca il pezzo: riposizionalo\n"
-                        "    dentro il materiale con 📍 Place.\n\n")
+                msg += ("⚠️  The keyring hole is not touching the piece:\n"
+                        "    reposition it inside the material with 📍 Place.\n\n")
 
         
         if path_3mf:

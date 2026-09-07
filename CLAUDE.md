@@ -16,7 +16,7 @@ MangaRelief Pro is a PyQt6 desktop app that quantizes manga grayscale (or full-c
 4. **Spot Color** — "silkscreen" mode: white base + 1-2 user-picked accent colors + black top, everything else binarized. Built for print accessibility (base + accent, not exact multi-color fidelity).
 5. **Phone Cover Plate** — generates a decorative back plate (multi-color, engraved or raised) sized to a specific phone's camera-cutout geometry, optionally paired with a companion TPU bumper/case STL.
 
-6. **Keychain / Cutout** — replaces the rectangular panel with the silhouette of the drawing (see `engine/cutout_utils.py`). Not a flag on the other modes: it is a mode, and like Phone Cover it carries a **Finish** selector (Spot Color / B-N) because the cutout decides the *shape*, not the colours.
+6. **Keychain / Cutout** — replaces the rectangular panel with the silhouette of the drawing (see `engine/cutout_utils.py`). Not a flag on the other modes: it is a mode, and like Phone Cover it carries a **Finish** selector (Spot Color / B&W) because the cutout decides the *shape*, not the colours.
 
 ## Commands
 
