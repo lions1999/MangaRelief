@@ -157,11 +157,25 @@ def suggest_spot_accents(image_rgb: np.ndarray, n_accents: int = 2) -> list:
     vivid = (hsv[..., 1] >= 90) & (hsv[..., 2] >= 60)
     pixels = img.reshape(-1, 3)[vivid.ravel()]
 
-    # Sotto lo 0.5% di pixel vividi non c'è nessun accento sensato da proporre
-    if len(pixels) < max(500, vivid.size // 200):
+    # Quanto colore serve perché ci sia un accento da proporre.
+    #
+    # Era lo 0,5% dell'immagine, ed era troppo: due occhi colorati in una
+    # vignetta altrimenti in bianco e nero valgono lo 0,2%, e sono il caso
+    # tipico per cui questa modalità esiste — venivano scartati.
+    #
+    # La soglia doveva difendere dal rumore di croma del JPEG, ma quel lavoro
+    # lo fa già la maschera `vivid`: misurato su pannelli davvero in bianco e
+    # nero, da qualità 95 a 30 e con rumore additivo fino a ±14, i pixel che
+    # superano S≥90 e V≥60 sono ZERO — un grigio non arriva a quella
+    # saturazione per quanto lo si maltratti. Quello che resta da escludere
+    # non è il rumore ma la macchia isolata (un timbro, una velatura), e per
+    # quella basta un pavimento piccolo.
+    if len(pixels) < max(120, vivid.size // 2000):
         return []
 
-    k = min(5, len(pixels))
+    # K limitato ai colori davvero distinti: con un accento a tinta piatta i
+    # punti coincidono e KMeans avvisa di non aver trovato i cluster chiesti.
+    k = min(5, len(np.unique(pixels, axis=0)))
     kmeans = KMeans(n_clusters=k, random_state=42, n_init='auto').fit(rgb_to_lab(pixels))
     centers, weights = merge_lab_clusters(kmeans.cluster_centers_,
                                           np.bincount(kmeans.labels_, minlength=k))

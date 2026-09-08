@@ -372,6 +372,24 @@ class Manga3DAppController(MainWindowUI):
             return 1600
         return 1200
 
+    def _spot_panel_active(self) -> bool:
+        """Se il pannello degli accenti e' in gioco adesso.
+
+        Non basta "modalita' Spot": gli accenti servono anche alla finitura
+        Spot della cover e a quella del portachiavi. La condizione era scritta
+        quando Spot era l'unica modalita' ad averli, ed e' rimasta indietro —
+        con l'effetto che nelle altre due il pannello si vedeva, il pulsante
+        si armava, e il click sull'immagine non faceva nulla.
+        """
+        idx = self.mode_selector.currentIndex()
+        if idx == 3:
+            return True
+        if idx == 4:
+            return self.combo_cover_finish.currentIndex() == 1
+        if idx == 5:
+            return self._keychain_spot()
+        return False
+
     def _get_spot_accents(self):
         """Accenti attivi (1 o 2 in base al selettore), senza i None."""
         n = self.combo_spot_naccents.currentIndex() + 1
@@ -1226,13 +1244,18 @@ class Manga3DAppController(MainWindowUI):
         # Ramo Spot Color: campionamento accento (ha priorità quando armato)
         if (self.active_spot_swatch is not None
                 and getattr(self, 'img_rgb_original', None) is not None
-                and self.mode_selector.currentIndex() == 3):
+                and self._spot_panel_active()):
             idx = self.active_spot_swatch
             self.active_spot_swatch = None
-            # In mockup il click deve campionare dall'originale, non dall'anteprima
-            if self.btn_spot_mockup.isChecked():
-                self.btn_spot_mockup.setChecked(False)
-                self.lbl_status.setText("🎯 Mockup off: click again on the ORIGINAL image to sample.")
+            # Il campione si prende dall'ORIGINALE. Qualunque anteprima e'
+            # un'altra immagine e per giunta a un'altra risoluzione, quindi le
+            # coordinate del click indicherebbero un altro pixel: si spegne e
+            # si chiede di ripetere, invece di campionare un colore inventato.
+            if any(getattr(self, n).isChecked() for n in self._PREVIEW_BUTTONS):
+                for n in self._PREVIEW_BUTTONS:
+                    getattr(self, n).setChecked(False)
+                self.lbl_status.setText(
+                    "🎯 Preview off: click again on the ORIGINAL image to sample.")
                 self.active_spot_swatch = idx
                 return
             self.spot_accents[idx] = self._sample_accent_at(x, y)

@@ -436,6 +436,42 @@ check("...ma la maschera dipinta resta senza click",
       not win.btn_cutout_edit.isEnabled())
 win.combo_cutout_src.setCurrentIndex(0)
 
+# Gli accenti Spot servono a TRE modalita' (Spot, cover con finitura Spot,
+# portachiavi con finitura Spot), ma la condizione del click chiedeva
+# "modalita' == Spot". Nelle altre due il pannello si vedeva, il pulsante si
+# armava, e il click sull'immagine non faceva niente — senza un messaggio,
+# perche' il ramo non partiva proprio.
+win.mode_selector.setCurrentIndex(KEYCHAIN)
+win.combo_keychain_finish.setCurrentIndex(0)          # Spot
+check("in Keychain+Spot il pannello accenti e' attivo", win._spot_panel_active())
+win.combo_keychain_finish.setCurrentIndex(1)          # B/N
+check("...e in Keychain+B/N no", not win._spot_panel_active())
+win.combo_keychain_finish.setCurrentIndex(0)
+
+win.spot_accents = [None, None]
+win.btn_cutout_edit.setChecked(False)
+win.btn_cutout_preview.setChecked(False)
+win.set_active_spot_swatch(0)
+win.on_pixel_clicked(*P_CUPOLA)
+check("in Keychain il click campiona davvero l'accento",
+      win.spot_accents[0] is not None, win.spot_accents[0])
+
+# Con un'anteprima accesa il campione verrebbe da un'altra immagine, a
+# un'altra risoluzione: si spegne e si chiede di ripetere invece di
+# raccogliere un colore inventato.
+win.spot_accents = [None, None]
+win.btn_cutout_preview.setChecked(True)
+win.set_active_spot_swatch(0)
+win.on_pixel_clicked(*P_CUPOLA)
+check("con un'anteprima accesa non campiona, la spegne e lo dice",
+      win.spot_accents[0] is None
+      and not any(getattr(win, n).isChecked() for n in win._PREVIEW_BUTTONS)
+      and "ORIGINAL" in win.lbl_status.text(), win.lbl_status.text()[:50])
+win.on_pixel_clicked(*P_CUPOLA)
+check("...e il click successivo campiona", win.spot_accents[0] is not None)
+win.spot_accents = [None, None]
+
+
 # I parametri fisici tornano indietro cambiando modalita'.
 #
 # Non e' pulizia: la copertura a 2 colori misura una finestra di 0,7 mm REALI,
