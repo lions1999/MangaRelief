@@ -1003,13 +1003,19 @@ class Manga3DAppController(MainWindowUI):
         # l'istogramma, quindi decide uguale alle due dimensioni; a 2 colori
         # la copertura media su una finestra in millimetri e il retino
         # ridiventa un tono pieno (2 frammenti invece di 1377, misurato).
-        # La condizione guarda il TRATTO e non `ok`: `ok` cade anche solo per i
-        # vuoti stretti, che un retino ha per definizione — a 200 mm quel
-        # pannello stampa benissimo a 4 colori e l'indizio sarebbe rumore.
-        # Lo speckle nasce quando e' l'inchiostro a non stare nell'ugello.
+        # La condizione non guarda una larghezza ma una QUOTA: quanta parte
+        # dell'inchiostro sta in frammenti troppo sottili per stampare da soli.
+        #
+        # Ne' il tratto piu' fine ne' la sua mediana bastano. Il primo e' basso
+        # su qualunque disegno, perche' le punte dei tratti sono sempre
+        # sottili — guardando quello si finisce a consigliare i 2 colori su una
+        # tavola a tratto, dove peggiorano il risultato (la finestra della
+        # copertura e' piu' larga dei tratti e li annega in una campitura). La
+        # seconda cade a cavallo della soglia appena il retino ha punti grandi
+        # quanto l'ugello. La quota invece separa i due casi con un margine che
+        # non si presta a interpretazioni: 77% contro 0%.
         messaggio = info['message']
-        if (info.get('ink_mm') is not None
-                and info['ink_mm'] < info.get('nozzle_mm', 0.4)
+        if (info.get('fine_share', 0.0) > 0.4
                 and getattr(self, 'color_mode_state', 4) >= 3
                 and self._usa_pipeline_standard()):
             messaggio += ("  At this size the halftone cannot resolve: 2-Color "

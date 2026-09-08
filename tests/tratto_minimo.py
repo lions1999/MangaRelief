@@ -353,15 +353,21 @@ print("\n=== il retino: perche' l'anteprima esce caotica ===")
 # per accorgersi se un domani la copertura smettesse di compattare il retino.
 
 
-def con_retino(n=600, passo=7):
+def con_retino(n=600, passo=5, raggio=1):
+    """Retino FINE: a 60 mm i punti misurano ~0,3 mm, sotto l'ugello da 0,4.
+
+    La misura dipende dalla frequenza del retino, non dal fatto che sia un
+    retino: con punti da 0,5 mm la stessa tavola stampa, e infatti la prima
+    versione di questa fixture non stava provando il caso che dice di provare.
+    """
     img = np.full((n, n), 252, np.uint8)
-    cv2.circle(img, (n // 2, int(n * 0.35)), int(n * 0.22), 0, 5)
+    cv2.circle(img, (n // 2, int(n * 0.30)), int(n * 0.18), 0, 5)
     for j in range(0, n, passo):
         for i in range(0, n, passo):
             x, y = i + (passo // 2 if (j // passo) % 2 else 0), j
-            if (x - n // 2) ** 2 + (y - int(n * 0.68)) ** 2 < int(n * 0.25) ** 2:
-                cv2.circle(img, (x, y), 2, 55, -1)
-    return cv2.GaussianBlur(img, (3, 3), 0)
+            if (x - n // 2) ** 2 + (y - int(n * 0.68)) ** 2 < int(n * 0.28) ** 2:
+                cv2.circle(img, (x, y), raggio, 55, -1)
+    return img
 
 
 def frammenti(gray_posterizzata, mm_per_px):
@@ -408,6 +414,47 @@ check("a 2 colori la copertura ricompatta il retino in tono pieno",
       n60c < n60 / 20 and lato60c > lato60 * 5,
       f"{n60} frammenti da {lato60:.2f} mm -> {n60c} da {lato60c:.2f} mm")
 
+# La mediana e' cio' che separa i due casi, e sono casi con rimedi OPPOSTI:
+# sul retino tutto il tratto sta sotto l'ugello e va letto come tono pieno
+# (2 colori); su una tavola a tratto ci stanno solo le punte, il disegno c'e'
+# tutto, e a 2 colori la finestra della copertura — larga piu' dei tratti — lo
+# annegherebbe in una campitura. Guardando il solo tratto piu' fine i due casi
+# sono indistinguibili, ed e' cosi' che il consiglio e' uscito sbagliato.
+
+
+def a_tratto(n=600):
+    """Campiture piene, contorni netti, e SOLO qualche tratteggio fine."""
+    img = np.full((n, n), 252, np.uint8)
+    cv2.rectangle(img, (20, 20), (n - 20, n - 20), 0, 10)
+    cv2.fillPoly(img, [np.array([[300, 40], [500, 120], [520, 400],
+                                 [380, 320], [280, 140]])], 0)
+    cv2.ellipse(img, (400, 380), (60, 26), 0, 0, 360, 0, 4)
+    for k in range(0, 60, 4):
+        cv2.line(img, (330 + k, 470), (360 + k, 520), 0, 1)
+    return img
+
+
+r_ret = feature_scale(retino, 60.0 / 600, max_dim_mm=60.0, nozzle_mm=0.4)
+r_tra = feature_scale(a_tratto(), 60.0 / 600, max_dim_mm=60.0, nozzle_mm=0.4)
+
+# La misura della larghezza non solo non distingue i due casi: sul retino
+# riporta un tratto PIU' LARGO che sulla tavola a tratto, perche' i punti sono
+# piu' piccoli del suo filtro anti-pulviscolo e non entrano nel conto. Guardare
+# quel numero per decidere fra 2 e 4 colori porta alla risposta rovesciata, ed
+# e' esattamente l'errore da cui viene questa sezione.
+check("la larghezza del tratto NON distingue i due casi (anzi, li rovescia)",
+      r_ret['ink_mm'] > r_tra['ink_mm'],
+      f"retino {r_ret['ink_mm']:.2f} mm, tratto {r_tra['ink_mm']:.2f} mm")
+
+# La quota di inchiostro in frammenti sottili si': con un margine che non si
+# presta a interpretazioni.
+check("la quota di inchiostro in frammenti sottili separa i due casi",
+      r_ret['fine_share'] > 0.4 > r_tra['fine_share'],
+      f"retino {100*r_ret['fine_share']:.0f}%, tratto {100*r_tra['fine_share']:.0f}%")
+check("...e il margine e' largo, non al pelo della soglia",
+      r_ret['fine_share'] - r_tra['fine_share'] > 0.5,
+      f"{100*(r_ret['fine_share']-r_tra['fine_share']):.0f} punti")
+
 # ...e l'interfaccia deve nominare quel rimedio quando serve, e tacere quando
 # non serve: un avviso che compare sempre si impara a ignorare.
 win.mode_selector.setCurrentIndex(0)
@@ -434,6 +481,22 @@ win._do_refresh_feature_scale()
 check("in Spot Color non lo suggerisce (li' quel controllo non c'e')",
       "2-Color mode" not in win.lbl_feature_scale.text())
 win.mode_selector.setCurrentIndex(0)
+
+# E su una tavola a tratto non lo suggerisce mai, a nessuna dimensione: li' i
+# 2 colori peggiorano il risultato, e questa e' la regressione da cui viene la
+# mediana.
+QFileDialog.getOpenFileName = staticmethod(
+    lambda *a, **k: (os.path.join(TMP, "tratto.png"), ""))
+cv2.imwrite(os.path.join(TMP, "tratto.png"), a_tratto())
+win.load_image()
+win.slider_line_thicken.setValue(0)
+for md in (200.0, 60.0, 50.0):
+    win.spin_dim.setValue(md)
+    win.color_mode_state = 4
+    win._do_refresh_feature_scale()
+    check(f"tavola a tratto a {md:.0f} mm: non suggerisce i 2 colori",
+          "2-Color mode" not in win.lbl_feature_scale.text(),
+          win.lbl_feature_scale.text()[-70:])
 
 
 print()
