@@ -189,6 +189,11 @@ check("...e spiega che i valori mancanti sono quelli di fabbrica",
       "factory values" in _msg)
 check("...e chiede di non cambiare l'altezza layer, su cui stanno i cambi",
       "layer" in _msg and "colour changes" in _msg)
+# Il processo e' l'unica delle tre tendine che non si aggiusta scegliendo la
+# stampante, ed e' quella su cui MakerWorld rifiuta l'upload: un progetto il cui
+# processo si chiama ancora come il file e' un preset personalizzato.
+check("...e avverte che MakerWorld rifiuta un processo col nome del file",
+      "MakerWorld" in _msg and "Process dropdown" in _msg)
 
 _visto.clear()
 _win.on_generate_done(os.path.join(d, "x.stl"), "")
