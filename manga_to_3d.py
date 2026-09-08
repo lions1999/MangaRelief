@@ -1669,7 +1669,32 @@ class Manga3DAppController(MainWindowUI):
 
         
         if path_3mf:
+            # Perche' Stampante, Filamenti e Processo si chiamano tutti come il
+            # file. Non e' un difetto del 3MF: Bambu Studio non FONDE la nostra
+            # configurazione col profilo di chi apre, ne costruisce uno nuovo
+            # intitolato al progetto, e ogni chiave che non nominiamo prende il
+            # valore di fabbrica. Dichiararne di piu' non aiuta — sarebbe
+            # un'altra impostazione imposta al posto della sua — quindi l'unico
+            # rimedio e' dirlo. Deciso in 9902d37 e mai arrivato fin qui: era
+            # scritto nel messaggio di commit e in nessun posto che l'utente
+            # legga.
+            layer_mm = self.spin_layer_height.value()
             msg += (
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⚙️  BEFORE SLICING — pick your profiles\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Printer, Filament and Process will all show\n"
+                f"as \"({os.path.basename(path_3mf)})\". That is Bambu Studio\n"
+                f"naming settings embedded in the project — not\n"
+                f"your presets. Everything this file does not\n"
+                f"declare falls back to factory values (nozzle\n"
+                f"200 °C instead of 220, outer wall 60 mm/s\n"
+                f"instead of 200), so it would print badly.\n\n"
+                f"Select your own Printer, Filament and Process\n"
+                f"from the three dropdowns first. Keep the layer\n"
+                f"height at {layer_mm:.2f} mm: the colour changes below are\n"
+                f"computed on it, and a different value puts them\n"
+                f"in the middle of a layer instead of on its edge.\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🎨  BAMBU STUDIO — Color Changes\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"

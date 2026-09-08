@@ -13,6 +13,14 @@ rumorosamente se qualcuno tocca l'esportazione senza saperli:
   `nozzle_diameter`, non `printer_technology`;
 - i filamenti dichiarati sono quelli che si stampano e nessun altro.
 
+E una conseguenza che non e' un difetto ma va detta a chi stampa: Bambu Studio
+non FONDE la nostra configurazione col profilo di chi apre il file, ne
+costruisce uno nuovo intitolato al progetto — per questo Stampante, Filamenti
+e Processo si chiamano tutti "(nomefile.3mf)" — e ogni chiave che non nominiamo
+prende il valore di fabbrica. Dichiararne di piu' non aiuterebbe: sarebbe
+un'altra impostazione imposta al posto della sua. L'unico rimedio e' dirlo, e
+qui si verifica che venga detto davvero.
+
     python tests/tremmeffe_bambu.py
 """
 
@@ -132,6 +140,49 @@ for colori in (2, 3, 4):
           (dx, dy) == (128.0, 128.0), (dx, dy))
     check(f"{n}: con la base appoggiata al piatto", abs(mn[2] + dz) < 1e-3, mn[2] + dz)
     print()
+
+# ---------------------------------------------------------------------------
+# Il file non dichiara nomi di profilo, e proprio per questo chi lo apre deve
+# sceglierli a mano: le due cose vanno verificate insieme, o si finisce col
+# togliere l'avvertenza perche' "il file e' a posto" — che e' vero e
+# irrilevante.
+print("--- i profili di chi apre ---")
+
+cfg_ultimo = json.loads(zipfile.ZipFile(r.mf3_path).read("Metadata/project_settings.config"))
+check("non dichiariamo nomi di profilo (quindi Bambu ne inventa uno col nome del file)",
+      not any(k.endswith("_settings_id") for k in cfg_ultimo),
+      [k for k in cfg_ultimo if k.endswith("_settings_id")] or sorted(cfg_ultimo))
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E402
+
+from manga_to_3d import Manga3DAppController  # noqa: E402
+
+_app = QApplication.instance() or QApplication(sys.argv)
+_src = os.path.join(d, "avviso.png")
+cv2.imwrite(_src, np.full((300, 300), 255, np.uint8))
+QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: (_src, ""))
+_visto = {}
+QMessageBox.information = staticmethod(lambda p, t, m: _visto.update(msg=m))
+
+_win = Manga3DAppController()
+_win.show()
+_win.load_image()
+_win.on_generate_done(os.path.join(d, "x.stl"), os.path.join(d, "x.3mf"))
+_msg = _visto.get("msg", "")
+check("esportando un 3MF, il popup dice di scegliere i propri profili",
+      "Printer, Filament and Process" in _msg and "dropdowns" in _msg,
+      _msg[:60])
+check("...e spiega che i valori mancanti sono quelli di fabbrica",
+      "factory values" in _msg)
+check("...e chiede di non cambiare l'altezza layer, su cui stanno i cambi",
+      "layer" in _msg and "colour changes" in _msg)
+
+_visto.clear()
+_win.on_generate_done(os.path.join(d, "x.stl"), "")
+check("senza 3MF l'avvertenza non compare (non c'e' nessun progetto da aprire)",
+      "BEFORE SLICING" not in _visto.get("msg", ""))
+print()
 
 print("TUTTO OK" if not fails else "FALLITI: " + ", ".join(fails))
 sys.exit(1 if fails else 0)
