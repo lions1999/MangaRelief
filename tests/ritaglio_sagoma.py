@@ -168,6 +168,55 @@ c_stacc = compute_cutout(IMG, max_dim=60.0, ring_xy=(30, 30),
                          ring_d_mm=4.0, ring_rim_mm=2.0)
 check("un occhiello fuori dal materiale viene dichiarato staccato",
       not c_stacc.ring_attached)
+check("...e della sua corona non resta niente da dipingere",
+      c_stacc.ring_mask is not None and int(c_stacc.ring_mask.sum()) == 0,
+      int(c_stacc.ring_mask.sum()) if c_stacc.ring_mask is not None else None)
+
+# --- l'occhiello deve essere alto quanto il pezzo, non un layer -------------
+#
+# La sagoma dice solo DOVE c'e' materiale; quanto e' alto lo decide la
+# classificazione del disegno sotto. Sotto la corona, quando l'anello sporge
+# dal soggetto, c'e' carta bianca — che e' il livello piu' basso. Ne usciva un
+# anello alto un layer: la parte piu' sottile del pezzo, messa esattamente
+# dove lo si tira. Va dipinto come inchiostro, e allora sale con il tratto.
+#
+# La prova misura la corona SULLA MESH e non sulla maschera: fra le due ci
+# sono la classificazione, il ricampionamento e le terrazze, ed e' proprio la
+# classificazione il passaggio che sbagliava.
+
+RING_FUORI = (450, 60)          # sopra la corona, ben fuori dal disegno
+
+check("(sotto la corona la sorgente e' carta bianca)",
+      bool((IMG[RING_FUORI[1] - 20:RING_FUORI[1] + 20,
+                RING_FUORI[0] - 20:RING_FUORI[0] + 20] > 240).all()),
+      "altrimenti la prova non sta misurando il caso che dichiara")
+
+
+def quota_corona(mesh, cut, centro, r_int=2.2, r_est=4.3):
+    """L'altezza massima raggiunta dalla corona, in mm."""
+    y0, y1, x0, x1 = cut.bbox
+    cx = (centro[0] - x0) * cut.pitch_mm
+    cy = ((y1 - y0) - (centro[1] - y0)) * cut.pitch_mm
+    v = mesh.vertices
+    r = np.hypot(v[:, 0] - cx, v[:, 1] - cy)
+    sulla = (r > r_int) & (r < r_est)
+    return (float(v[sulla, 2].max()) if sulla.any() else None), int(sulla.sum())
+
+
+for spot in (True, False):
+    nome = "spot" if spot else "bn"
+    m_ring, r_ring = genera(f"occhiello_{nome}", keychain_finish_spot=spot,
+                            cutout_ring=True, cutout_ring_xy=RING_FUORI,
+                            cutout_ring_d_mm=4.0, cutout_ring_rim_mm=2.5,
+                            color_mode=2, color_changes_z=[1.4, 2.0, 2.4])
+    c_ring = compute_cutout(IMG, max_dim=60.0, ring_xy=RING_FUORI,
+                            ring_d_mm=4.0, ring_rim_mm=2.5)
+    quota, quanti = quota_corona(m_ring, c_ring, RING_FUORI)
+    check(f"finitura {'Spot' if spot else 'B/N'}: la corona arriva a tutta altezza",
+          quanti > 0 and quota is not None and abs(quota - 2.4) < 1e-6,
+          f"{quanti} vertici, quota {quota} mm (base 1.0, cima 2.4)")
+    check(f"finitura {'Spot' if spot else 'B/N'}: e resta chiusa e in un pezzo",
+          m_ring.is_watertight and m_ring.body_count == 1)
 
 # La decimazione e' accesa di default nell'app, e nel suo finale chiama
 # trimesh.repair.fill_holes: un foro passante e' esattamente la cosa che quella

@@ -291,23 +291,31 @@ def _disc(shape, cx: float, cy: float, r: float) -> np.ndarray:
     return (xx - cx) ** 2 + (yy - cy) ** 2 <= r * r
 
 
-def add_ring(mask: np.ndarray, cx: float, cy: float,
-             hole_r_px: float, rim_px: float) -> Tuple[np.ndarray, bool]:
+def add_ring(mask: np.ndarray, cx: float, cy: float, hole_r_px: float,
+             rim_px: float) -> Tuple[np.ndarray, np.ndarray, bool]:
     """Aggiunge l'occhiello: una corona di materiale meno il foro.
 
-    Ritorna anche se l'occhiello e' rimasto attaccato al pezzo. Non lo
+    Ritorna anche la corona stessa, e non e' un di piu': la sagoma dice solo
+    DOVE c'e' materiale, l'altezza gliela da' la classificazione del disegno
+    sotto — e sotto la corona, quando sporge dal soggetto, c'e' carta bianca.
+    Ne esce un anello alto un layer, cioe' la parte piu' fragile del pezzo
+    messa esattamente dove lo si tira. Chi chiama usa questa maschera per
+    dipingerla come inchiostro, e allora sale a tutta altezza col tratto.
+
+    Ritorna inoltre se l'occhiello e' rimasto attaccato al pezzo. Non lo
     aggiusta da solo: spostarlo di autorita' sarebbe peggio che dirlo, perche'
     dove va l'anello lo sa solo chi guarda il disegno.
     """
     outer_r = float(hole_r_px) + float(rim_px)
     boss = _disc(mask.shape, cx, cy, outer_r)
     hole = _disc(mask.shape, cx, cy, float(hole_r_px))
+    corona = boss & ~hole
 
     # Attaccato = la corona tocca il materiale che c'era gia'. Si guarda prima
     # di unire, altrimenti la risposta e' sempre si'.
-    attached = bool((boss & ~hole & mask).any())
+    attached = bool((corona & mask).any())
 
-    return (mask | boss) & ~hole, attached
+    return (mask | boss) & ~hole, corona, attached
 
 
 def mask_bbox(mask: np.ndarray, pad: int = 0) -> Optional[Tuple[int, int, int, int]]:
@@ -356,6 +364,9 @@ class CutoutResult:
     pitch_mm: float = 0.0              # mm per pixel del raster segmentazione
     n_pieces: int = 0                  # tronconi trovati prima dello scarto
     ring_attached: bool = True
+    # La corona dell'occhiello, gia' intersecata con la sagoma finale: serve a
+    # chi genera per dipingerla come inchiostro e portarla a tutta altezza.
+    ring_mask: Optional[np.ndarray] = None
     empty: bool = False
 
 
@@ -407,9 +418,9 @@ def compute_cutout(image: np.ndarray, *,
         if border_mm > 0:
             mask = dilate_mask(mask, int(round((border_mm / 2.0) / pitch)))
 
-        attached = True
+        attached, corona = True, None
         if ring_xy is not None:
-            mask, attached = add_ring(
+            mask, corona, attached = add_ring(
                 mask, float(ring_xy[0]), float(ring_xy[1]),
                 hole_r_px=(ring_d_mm / 2.0) / pitch,
                 rim_px=ring_rim_mm / pitch)
@@ -423,9 +434,13 @@ def compute_cutout(image: np.ndarray, *,
 
         y0, y1, x0, x1 = bbox
         pitch = float(max_dim) / max(y1 - y0, x1 - x0)
+        # La corona va intersecata con la sagoma DOPO la pulizia: se
+        # keep_largest ha scartato un occhiello staccato, li' non c'e' piu'
+        # niente da dipingere.
         result = CutoutResult(mask=mask, bbox=bbox, regions=regions,
                               pitch_mm=pitch, n_pieces=n_pieces,
-                              ring_attached=attached)
+                              ring_attached=attached,
+                              ring_mask=(corona & mask) if corona is not None else None)
 
     return result
 

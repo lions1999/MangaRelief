@@ -449,7 +449,7 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
     # scegliere come colorare l'arte, e le due strade sono quelle che il
     # motore ha già — Spot Color (base bianca + accenti + nero) o la
     # posterizzazione Standard.
-    cutout_mask = None
+    cutout_mask = cutout_ring = None
     cutout_pieces, cutout_ring_ok = 0, True
     if p.is_keychain_mode:
         emit(4, "✂️ Building cutout silhouette...")
@@ -467,6 +467,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
                 "The cutout leaves no material: check the regions marked as "
                 "void, or the painted mask.")
         cutout_mask = crop(cut.mask, cut.bbox)
+        cutout_ring = (crop(cut.ring_mask, cut.bbox)
+                       if cut.ring_mask is not None else None)
         img_work = _crop_source_to(img_work, cut.bbox, cut.mask.shape[:2])
         cutout_pieces, cutout_ring_ok = cut.n_pieces, cut.ring_attached
         check_cancel()
@@ -481,6 +483,25 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
         emit(7, "🖊 Thickening linework...")
         pitch = p.max_dim / max(img_work.shape[0], img_work.shape[1])
         img_work = thicken_ink(img_work, p.line_thicken_mm, pitch)
+        check_cancel()
+
+
+    # L'occhiello dipinto come inchiostro, cioe' portato a tutta altezza.
+    #
+    # La sagoma dice solo DOVE c'e' materiale; quanto e' alto lo decide la
+    # classificazione del disegno sotto, e sotto la corona — quando sporge dal
+    # soggetto — c'e' carta bianca. Senza questo passaggio l'anello esce alto
+    # un layer: la parte piu' sottile del pezzo messa esattamente dove lo si
+    # tira. Dipingerlo nero lo fa salire con il tratto, e vale per entrambe le
+    # finiture del portachiavi: nella palette Spot il nero e' l'ultimo slot,
+    # nella posterizzazione Standard e' la quota massima.
+    #
+    # Dopo l'ingrossamento e non prima: cosi' la corona resta esattamente
+    # l'anello calcolato, senza il bordo che la dilatazione le aggiungerebbe.
+    if cutout_ring is not None and cutout_ring.any():
+        anello = resize_mask(cutout_ring, img_work.shape[:2])
+        img_work = np.ascontiguousarray(img_work).copy()
+        img_work[anello] = 0
         check_cancel()
 
     if p.is_cover_mode and p.cover_preset:
