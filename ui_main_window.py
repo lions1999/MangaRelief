@@ -455,6 +455,16 @@ class MainWindowUI(QMainWindow):
         self.spin_dim.setValue(200.0)
         form_layout.addRow("Max Dim (mm):", self.spin_dim)
 
+        # Quanto viene il tratto piu' fine a QUESTA dimensione. Va qui e non
+        # nella barra di stato perche' e' un numero che si consulta mentre si
+        # gira la manopola sopra, e un messaggio di stato lo cancella il primo
+        # altro evento.
+        self.lbl_feature_scale = QLabel("")
+        self.lbl_feature_scale.setObjectName("lbl_feature_scale")
+        self.lbl_feature_scale.setWordWrap(True)
+        self.lbl_feature_scale.setVisible(False)
+        form_layout.addRow("", self.lbl_feature_scale)
+
         self.spin_base = QDoubleSpinBox()
         self.spin_base.setRange(0.2, 10.0)  # min 0.2: le plate cover sono slim
         self.spin_base.setValue(1.0)

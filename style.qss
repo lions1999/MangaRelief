@@ -104,3 +104,15 @@ QPushButton#btn_generate[state="cancel"] {
     color: #11111b;
     font-weight: bold;
 }
+
+
+/* Il tratto piu' fine a questa dimensione: nota discreta quando va bene,
+   avviso quando il tratto non ci sta nell'ugello. */
+QLabel#lbl_feature_scale {
+    font-size: 11px;
+    color: #8a90a2;
+    padding: 2px 0px;
+}
+QLabel#lbl_feature_scale[state="warn"] {
+    color: #e0a030;
+}

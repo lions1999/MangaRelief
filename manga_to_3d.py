@@ -16,7 +16,7 @@ from utils import resource_path
 from ui_main_window import MainWindowUI
 from engine import (GenerationMode, GenerationParams, ink_level,
                     prepare_source_image, standard_heightmap)
-from engine.color_utils import (extract_dominant_colors, suggest_midtones,
+from engine.color_utils import (extract_dominant_colors, suggest_midtones, feature_scale,
                          suggest_spot_accents, classify_spot_pixels,
                          downsample_for_analysis, build_spot_palette,
                          grayscale_palette)
@@ -157,6 +157,18 @@ class Manga3DAppController(MainWindowUI):
         # cambia quanti pixel entrano nella finestra e cambia la
         # classificazione. Senza questa riga il mockup mostrava quella vecchia.
         self.spin_dim.valueChanged.connect(lambda _: self._refresh_std_mockup())
+
+        # Il tratto piu' fine in millimetri: dipende da quanto sara' grande il
+        # pezzo e da cosa conta come inchiostro, quindi si rifa' quando cambia
+        # una delle due — e al cambio di modalita', che le cambia entrambe.
+        self.spin_dim.valueChanged.connect(lambda _: self._refresh_feature_scale())
+        self.spin_white_clip.valueChanged.connect(lambda _: self._refresh_feature_scale())
+        self.mode_selector.currentIndexChanged.connect(
+            lambda _: self._refresh_feature_scale())
+        self.combo_keychain_finish.currentIndexChanged.connect(
+            lambda _: self._refresh_feature_scale())
+        self.slider_cutout_border.valueChanged.connect(
+            lambda _: self._refresh_feature_scale())
         for _sp in (self.spin_z1, self.spin_z2, self.spin_z3):
             _sp.valueChanged.connect(lambda _: self._refresh_std_mockup())
 
@@ -790,6 +802,59 @@ class Manga3DAppController(MainWindowUI):
         flags = resolve_cut_flags(regions, self.cutout_cut_seeds, self.cutout_keep_seeds)
         return flags[lb]
 
+    # ------------------------------------------------------------------
+    # QUANTO E' FINE IL TRATTO, A QUESTA DIMENSIONE
+
+    def _feature_scale_source(self):
+        """L'immagine e il passo mm/pixel su cui misurare.
+
+        Il passo e' quello del PEZZO, non del foglio: in modalita' portachiavi
+        la sorgente viene ritagliata alla sagoma, quindi un disegno che occupa
+        un quarto dell'immagine ha tratti quattro volte piu' grossi di quanto
+        direbbe il conto fatto sul foglio intero. Il ritaglio quel passo lo ha
+        gia' calcolato (CutoutResult.pitch_mm), e va usato quello.
+        """
+        if self._is_keychain():
+            res = self._compute_cutout_now()
+            if res is None or res.empty or not res.pitch_mm:
+                return None, None
+            src = self._cutout_source()
+            return to_seg_raster(src, SEG_MAX_RES), res.pitch_mm
+
+        img = getattr(self, 'img_filtered_array', None)
+        if img is None:
+            return None, None
+        return img, self.spin_dim.value() / max(img.shape[0], img.shape[1])
+
+    def _refresh_feature_scale(self):
+        """Accorpa le richieste ravvicinate: la misura costa una distance
+        transform, e in portachiavi anche una segmentazione."""
+        if getattr(self, '_fscale_timer', None) is None:
+            self._fscale_timer = QTimer(self)
+            self._fscale_timer.setSingleShot(True)
+            self._fscale_timer.timeout.connect(self._do_refresh_feature_scale)
+        self._fscale_timer.start(200)
+
+    def _do_refresh_feature_scale(self):
+        img, mm_per_px = self._feature_scale_source()
+        if img is None:
+            self.lbl_feature_scale.setVisible(False)
+            return
+        try:
+            info = feature_scale(img, mm_per_px,
+                                 white_clip=self.spin_white_clip.value(),
+                                 max_dim_mm=self.spin_dim.value())
+        except Exception as e:          # una misura non deve mai fermare la UI
+            print(f"Warning: feature scale not computed ({e})")
+            self.lbl_feature_scale.setVisible(False)
+            return
+
+        self.lbl_feature_scale.setText(info['message'])
+        self.lbl_feature_scale.setVisible(True)
+        self.lbl_feature_scale.setProperty("state", "" if info['ok'] else "warn")
+        self.lbl_feature_scale.style().unpolish(self.lbl_feature_scale)
+        self.lbl_feature_scale.style().polish(self.lbl_feature_scale)
+
     def _get_rgb_filtered(self):
         """Filtro bilaterale RGB calcolato lazy alla prima richiesta (serve solo all'anteprima Topo)."""
         if getattr(self, 'img_rgb_filtered', None) is None:
@@ -1037,6 +1102,7 @@ class Manga3DAppController(MainWindowUI):
 
         # Trigger real-time UI update based on new midtone percentage
         self._refresh_color_mode()
+        self._refresh_feature_scale()
         self.lbl_status.setText("✅ Ready. Use the layer swatches to pick grey tones.")
 
     def set_active_swatch(self, idx):

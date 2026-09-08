@@ -393,3 +393,134 @@ def bw_coverage_map(gray: np.ndarray, target_wh, window_px: int,
     if win > 1:
         frac = cv2.blur(frac, (win, win), borderType=cv2.BORDER_REFLECT)
     return frac
+
+
+# ---------------------------------------------------------------------------
+# Quanto e' fine il tratto, in millimetri di stampa
+#
+# La domanda a cui questo risponde e' quella che altrimenti si scopre solo
+# guardando lo slicer: a questa dimensione, il tratto di QUESTO disegno
+# stampera'? Non e' una proprieta' dell'immagine ne' una della stampante — e'
+# il prodotto delle due, e cambia ogni volta che si tocca Max Dim.
+#
+# Ci sono due modi distinti di fallire, e servono due misure:
+#
+#   il tratto e' troppo sottile   -> non esiste una parete cosi' stretta, il
+#                                    tratto si assottiglia fino a sparire
+#   il vuoto FRA i tratti e' troppo stretto -> i tratti vicini si fondono, e
+#                                    un tratteggio diventa una macchia piena
+#
+# Sono la stessa misura fatta due volte, sull'inchiostro e sulla carta.
+# ---------------------------------------------------------------------------
+
+# Una traccia di ugello: sotto, la geometria non esiste proprio.
+NOZZLE_MM = 0.4
+# Due tracce: sopra, il tratto e' una parete che regge davvero.
+SOLID_MM = 0.8
+
+
+def _thinnest_mm(binary: np.ndarray, mm_per_px: float, percentile: float,
+                 min_area_px: int):
+    """Larghezza al percentile richiesto delle strutture di `binary`, in mm.
+
+    La misura viene dalla distance transform letta sulla cresta: per un tratto
+    di larghezza w, la distanza dal centro al bordo vale circa (w+1)/2, quindi
+    w ≈ 2·d − 1. Sui tratti di larghezza pari la formula sottostima di un
+    pixel, e va bene cosi': questo numero finisce in un avvertimento, e un
+    avvertimento che sbaglia deve sbagliare dalla parte della prudenza.
+
+    La cresta si trova senza scheletrizzare (che vorrebbe opencv-contrib):
+    un pixel e' cresta se la sua distanza e' massima nel suo 3x3.
+    """
+    b = binary.astype(np.uint8)
+
+    # Il pulviscolo (rumore JPEG, pixel isolati di antialiasing) non e' tratto:
+    # senza toglierlo il percentile piu' basso descrive la scansione, non il
+    # disegno.
+    if min_area_px > 1:
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(b, connectivity=8)
+        if n > 1:
+            keep = stats[:, cv2.CC_STAT_AREA] >= min_area_px
+            keep[0] = False
+            b = keep[labels].astype(np.uint8)
+
+    # Serve sia qualcosa da misurare sia uno sfondo da cui misurarlo: una
+    # tavola tutta bianca non ha vuoti "stretti", ha un vuoto solo che non
+    # confina con niente, e la distance transform ci diverge dentro.
+    if not b.any() or b.all():
+        return None
+
+    dist = cv2.distanceTransform(b, cv2.DIST_L2, 5)
+    ridge = (dist > 0) & (dist >= cv2.dilate(dist, np.ones((3, 3), np.uint8)) - 1e-3)
+    if not ridge.any():
+        return None
+
+    widths_px = np.maximum(1.0, 2.0 * dist[ridge] - 1.0)
+    return float(np.percentile(widths_px, percentile)) * float(mm_per_px)
+
+
+def feature_scale(image: np.ndarray, mm_per_px: float, white_clip: int = 235,
+                  percentile: float = 10.0, min_area_px: int = 12,
+                  max_dim_mm: Optional[float] = None) -> dict:
+    """Quanto misurano, in mm di stampa, il tratto piu' fine e il vuoto piu' stretto.
+
+    `mm_per_px` va calcolato sull'immagine che il motore ricevera' davvero: in
+    modalita' portachiavi la sorgente viene ritagliata alla sagoma, quindi il
+    passo e' quello del pezzo e non quello del foglio.
+
+    `max_dim_mm` e' la dimensione che l'utente legge nel pannello, e serve solo
+    per dire "servirebbero almeno N mm". Va passata perche' non sempre si
+    ricava dall'immagine: nelle modalita' a pannello coincide con
+    lato_lungo x mm_per_px, ma dove la sorgente e' piu' larga del pezzo (il
+    ritaglio) quel prodotto misura il foglio, e il consiglio uscirebbe
+    gonfiato del rapporto fra i due.
+
+    Ritorna un dizionario con le due misure, la dimensione minima che
+    porterebbe il tratto a SOLID_MM, e un messaggio pronto da mostrare.
+    """
+    gray = image
+    if gray.ndim == 3:
+        gray = cv2.cvtColor(np.ascontiguousarray(gray, np.uint8), cv2.COLOR_RGB2GRAY)
+    ink = gray < int(white_clip)
+
+    out = {
+        'mm_per_px': float(mm_per_px),
+        'ink_mm': _thinnest_mm(ink, mm_per_px, percentile, min_area_px),
+        'gap_mm': _thinnest_mm(~ink, mm_per_px, percentile, min_area_px),
+        'min_dim_mm': None,
+        'ok': True,
+        'message': "",
+    }
+
+    ink_mm, gap_mm = out['ink_mm'], out['gap_mm']
+    if ink_mm is None:
+        out['message'] = "No linework detected at this White Clip."
+        return out
+
+    # A quale Max Dim quel tratto diventerebbe una parete solida. La scala e'
+    # lineare, quindi e' una proporzione: il rapporto fra le due larghezze.
+    riferimento = (float(max_dim_mm) if max_dim_mm
+                   else max(image.shape[0], image.shape[1]) * mm_per_px)
+    out['min_dim_mm'] = riferimento * (SOLID_MM / ink_mm)
+
+    parts = [f"Finest stroke {ink_mm:.2f} mm"]
+    if ink_mm < NOZZLE_MM:
+        out['ok'] = False
+        parts.append(f"below the {NOZZLE_MM:.1f} mm nozzle: it will merge or "
+                     f"vanish. Needs ≥ {out['min_dim_mm']:.0f} mm to print as drawn")
+    elif ink_mm < SOLID_MM:
+        out['ok'] = False
+        parts.append(f"printable but fragile. {SOLID_MM:.1f} mm at "
+                     f"≥ {out['min_dim_mm']:.0f} mm")
+    else:
+        parts.append("prints as a solid wall")
+
+    # Il vuoto conta solo se c'e': un disegno di sole campiture piene non ha
+    # tratti vicini da fondere, e avvertirlo sarebbe rumore.
+    if gap_mm is not None and gap_mm < NOZZLE_MM:
+        out['ok'] = False
+        parts.append(f"gaps {gap_mm:.2f} mm — nearby strokes will merge into a "
+                     f"solid area")
+
+    out['message'] = " — ".join(parts) + "."
+    return out
