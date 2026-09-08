@@ -331,6 +331,53 @@ win.btn_cutout_edit.setChecked(True)
 check("entrando in modifica l'anteprima si accende (i click si leggono li')",
       win.btn_cutout_preview.isChecked())
 
+# Le quattro anteprime mostrano ognuna un'immagine sua, a una risoluzione sua.
+# Due accese insieme non sono uno stato ambiguo, sono uno stato SBAGLIATO: i
+# click del ritaglio si leggono sul raster di segmentazione, e sull'immagine
+# di un'altra anteprima indicano un'altra regione.
+#
+# Il caso da cui viene questa prova: con un mockup acceso, premere Edit
+# regions accendeva l'anteprima del ritaglio, che spegneva il mockup, il cui
+# handler passava da _update_viewport_mode, che rispegneva l'anteprima del
+# ritaglio e con essa la modifica. Il pulsante tornava su da solo e da li' in
+# poi i click non tagliavano piu' niente — senza un messaggio d'errore, perche'
+# dal punto di vista del codice non era successo nulla di illecito.
+
+
+def accese():
+    return [n for n in win._PREVIEW_BUTTONS if getattr(win, n).isChecked()]
+
+
+for partenza in ('btn_std_mockup', 'btn_spot_mockup'):
+    win.btn_cutout_edit.setChecked(False)
+    getattr(win, partenza).setChecked(True)
+    check(f"({partenza} acceso da solo)", accese() == [partenza], accese())
+    win.btn_cutout_edit.setChecked(True)
+    check(f"con {partenza} acceso, Edit regions resta armato",
+          win.btn_cutout_edit.isChecked() and accese() == ['btn_cutout_preview'],
+          f"edit={win.btn_cutout_edit.isChecked()} accese={accese()}")
+    prima = win._compute_cutout_now().mask[P_VUOTO[1], P_VUOTO[0]]
+    win.on_pixel_clicked(*P_VUOTO)
+    check(f"...e il click taglia davvero (partendo da {partenza})",
+          prima and not win._compute_cutout_now().mask[P_VUOTO[1], P_VUOTO[0]])
+    win._reset_cutout()
+
+# E la direzione opposta: accendere un mockup mentre si modificano le regioni
+# deve disarmare la modifica, non lasciarla armata su un'immagine che non e'
+# quella su cui i click sono definiti.
+win.btn_cutout_edit.setChecked(True)
+win.btn_std_mockup.setChecked(True)
+check("accendendo un mockup, la modifica delle regioni si disarma",
+      not win.btn_cutout_edit.isChecked() and accese() == ['btn_std_mockup'],
+      f"edit={win.btn_cutout_edit.isChecked()} accese={accese()}")
+
+for n in ('btn_spot_mockup', 'btn_cutout_preview', 'btn_std_mockup',
+          'btn_cutout_preview'):
+    getattr(win, n).setChecked(True)
+    check(f"mai due anteprime insieme (acceso {n})", accese() == [n], accese())
+
+win.btn_cutout_edit.setChecked(True)
+
 # Il click vero, sulle coordinate del raster di segmentazione — che per una
 # sorgente 900x900 e cap 1600 coincide con la sorgente.
 prima = win._compute_cutout_now().mask[P_VUOTO[1], P_VUOTO[0]]

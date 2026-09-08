@@ -177,8 +177,38 @@ class Manga3DAppController(MainWindowUI):
         for _sp in (self.spin_z1, self.spin_z2, self.spin_z3):
             _sp.valueChanged.connect(lambda _: self._refresh_std_mockup())
 
+    # Le quattro anteprime (Spot, Standard, Cover, Ritaglio) mostrano ognuna
+    # un'immagine sua, a una risoluzione sua: due accese insieme non sono uno
+    # stato ambiguo, sono uno stato SBAGLIATO, perché i click del ritaglio si
+    # leggono sul raster di segmentazione e sull'immagine di un'altra
+    # anteprima indicano un'altra regione.
+    _PREVIEW_BUTTONS = ('btn_spot_mockup', 'btn_std_mockup',
+                        'btn_cover_preview', 'btn_cutout_preview')
+
+    def _exclusive_preview(self, keep):
+        """Spegne le altre anteprime, lasciando accesa quella che si sta accendendo.
+
+        La guardia non è prudenza: spegnere un'anteprima passa da
+        _update_viewport_mode, che a sua volta spegne quella che stiamo
+        accendendo — e il risultato era Edit regions che si disarmava da solo
+        appena premuto, se c'era un mockup acceso. Il pulsante lampeggiava e
+        tornava su, e da lì in poi i click sulle regioni non tagliavano nulla.
+        """
+        self._preview_switching = True
+        try:
+            for name in self._PREVIEW_BUTTONS:
+                btn = getattr(self, name)
+                if btn is not keep and btn.isChecked():
+                    btn.setChecked(False)
+        finally:
+            self._preview_switching = False
+
     def _update_viewport_mode(self, index):
         """Switch viewport display between Color and Grayscale based on selected mode."""
+        # Durante uno scambio di anteprime il viewport lo dipinge chi si sta
+        # accendendo: intervenire qui vorrebbe dire spegnerla.
+        if getattr(self, '_preview_switching', False):
+            return
         # Cambiando modalità le anteprime toggle si spengono sempre
         if self.btn_spot_mockup.isChecked():
             self.btn_spot_mockup.setChecked(False)
@@ -288,6 +318,7 @@ class Manga3DAppController(MainWindowUI):
             self.btn_cover_preview.setChecked(False)
             return
         if checked:
+            self._exclusive_preview(self.btn_cover_preview)
             self.btn_cover_preview.setText("👁 Back to Original")
             self._refresh_cover_preview()
         else:
@@ -400,6 +431,7 @@ class Manga3DAppController(MainWindowUI):
             self.btn_spot_mockup.setChecked(False)
             return
         if checked:
+            self._exclusive_preview(self.btn_spot_mockup)
             self._do_refresh_spot_mockup()   # immediato all'accensione
             self.btn_spot_mockup.setText("👁 Back to Original")
         else:
@@ -502,6 +534,7 @@ class Manga3DAppController(MainWindowUI):
             self.btn_std_mockup.setChecked(False)
             return
         if checked:
+            self._exclusive_preview(self.btn_std_mockup)
             self._do_refresh_std_mockup()
             self.btn_std_mockup.setText("👁 Back to Original")
         else:
@@ -721,9 +754,7 @@ class Manga3DAppController(MainWindowUI):
             self.btn_cutout_preview.setChecked(False)
             return
         if checked:
-            self.btn_spot_mockup.setChecked(False)
-            self.btn_std_mockup.setChecked(False)
-            self.btn_cover_preview.setChecked(False)
+            self._exclusive_preview(self.btn_cutout_preview)
             self.btn_cutout_preview.setText("👁 Back to Original")
             self._do_refresh_cutout_preview()
         else:
