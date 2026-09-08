@@ -95,6 +95,7 @@ Qt widget tests must run with `QT_QPA_PLATFORM=offscreen` and **must call `win.s
 
 ### Key conventions carried from earlier modes (still apply)
 
+- **`_PHYS_DEFAULTS`** (`manga_to_3d.py`) — ogni modalita' porta con se' la propria taglia (Max Dim / Base / Max Z / Layer), **in entrambe le direzioni**. Non e' cosmesi: la copertura a 2 colori misura una finestra di `BW_WINDOW_MM` = 0,7 mm *reali*, quindi Max Dim decide quanti pixel della sorgente ci finiscono dentro (4 px a 200 mm, 14 px a 60 mm) e con essi la classificazione. Quando i default si applicavano solo *entrando* in Cover e Keychain, dopo un giro nel portachiavi la modalita' Standard restava a 60 mm e binarizzava lo stesso pannello con una finestra tre volte piu' grossa, a cursore fermo. Per lo stesso motivo `spin_dim` e' connesso a `_refresh_std_mockup`.
 - Z heights always snap to `layer_height` and round to 3 decimals.
 - Standard-mode sampled grays: `[L0 white bg, L1 light, L2 dark, L3 black]`.
 - Output paths are auto-computed next to the source image with anti-overwrite numbering. The stem says which mode made the file, because `output/` mixes them: `<image>_3D` for the panel modes, `<image>_keychain` for Keychain. A **prefix** instead of a suffix marks the modes that emit more than one file that belong together — `cover_plate_<image>` + `cover_bumper_<image>`, `full_deckbox_<image>` — where it groups them by role (`MeshWorker.companion_path_for` derives the bumper from the plate — keep them in sync if you change the naming scheme).

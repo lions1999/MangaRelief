@@ -374,6 +374,42 @@ check("...ma la maschera dipinta resta senza click",
       not win.btn_cutout_edit.isEnabled())
 win.combo_cutout_src.setCurrentIndex(0)
 
+# I parametri fisici tornano indietro cambiando modalita'.
+#
+# Non e' pulizia: la copertura a 2 colori misura una finestra di 0,7 mm REALI,
+# quindi Max Dim decide quanti pixel della sorgente ci stanno dentro. Con i
+# default che si applicavano solo entrando (e mai uscendo), dopo un giro nel
+# portachiavi la modalita' Standard restava a 60 mm e binarizzava lo stesso
+# pannello con una finestra tre volte piu' grossa — cursore fermo, immagine
+# uguale, risultato diverso e nessuno a dirlo.
+win.mode_selector.setCurrentIndex(0)
+dim_std, base_std = win.spin_dim.value(), win.spin_base.value()
+win.mode_selector.setCurrentIndex(KEYCHAIN)
+dim_key = win.spin_dim.value()
+check("la modalita' portachiavi ha una sua taglia", dim_key < dim_std,
+      f"{dim_key} vs {dim_std}")
+win.mode_selector.setCurrentIndex(0)
+check("tornando in Standard i parametri tornano quelli di prima",
+      win.spin_dim.value() == dim_std and win.spin_base.value() == base_std,
+      f"MaxDim={win.spin_dim.value()} Base={win.spin_base.value()}")
+win.mode_selector.setCurrentIndex(4)
+win.mode_selector.setCurrentIndex(3)
+check("...e vale per ogni modalita', non solo per il portachiavi",
+      win.spin_dim.value() == dim_std and win.spin_layer_height.value() == 0.20,
+      f"MaxDim={win.spin_dim.value()} Layer={win.spin_layer_height.value()}")
+
+# Il mockup Standard restava acceso attraverso il cambio di modalita',
+# mostrando una classificazione calcolata con parametri che non esistono piu'.
+win.mode_selector.setCurrentIndex(0)
+win.btn_std_mockup.setChecked(True)
+win.mode_selector.setCurrentIndex(KEYCHAIN)
+check("cambiando modalita' il mockup Standard si spegne, come gli altri",
+      not win.btn_std_mockup.isChecked())
+check("e il pulsante torna a proporsi", win.btn_std_mockup.text() == "👁 Mockup Preview",
+      win.btn_std_mockup.text())
+win.mode_selector.setCurrentIndex(KEYCHAIN)
+
+
 # L'ordine dei riquadri, che e' una proprieta' del pannello e non una
 # questione di gusto: il selettore della finitura decide se compaiono gli
 # accenti Spot o gli swatch Standard, quindi deve stare SOPRA di loro. Con il

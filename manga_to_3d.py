@@ -152,6 +152,11 @@ class Manga3DAppController(MainWindowUI):
         self.spin_black_clip.valueChanged.connect(lambda _: self._refresh_std_mockup())
         self.cmb_quality.currentIndexChanged.connect(lambda _: self._refresh_std_mockup())
         self.chk_auto_z.toggled.connect(lambda _: self._refresh_std_mockup())
+        # Max Dim non e' solo la scala: a 2 colori la copertura si misura su
+        # una finestra in millimetri, quindi cambiando la dimensione del pezzo
+        # cambia quanti pixel entrano nella finestra e cambia la
+        # classificazione. Senza questa riga il mockup mostrava quella vecchia.
+        self.spin_dim.valueChanged.connect(lambda _: self._refresh_std_mockup())
         for _sp in (self.spin_z1, self.spin_z2, self.spin_z3):
             _sp.valueChanged.connect(lambda _: self._refresh_std_mockup())
 
@@ -166,6 +171,12 @@ class Manga3DAppController(MainWindowUI):
             return
         if self.btn_cutout_preview.isChecked():
             self.btn_cutout_preview.setChecked(False)
+            return
+        # Anche questo: era l'unico che restava acceso cambiando modalità, e
+        # mostrava una classificazione calcolata con i parametri della
+        # modalità precedente — che dopo un giro nel portachiavi sono altri.
+        if self.btn_std_mockup.isChecked():
+            self.btn_std_mockup.setChecked(False)
             return
 
         if getattr(self, 'img_filtered_array', None) is None:
@@ -182,21 +193,36 @@ class Manga3DAppController(MainWindowUI):
     # PHONE COVER — composizione artwork sulla plate
     # ------------------------------------------------------------------
 
+    # Taglie di default per modalità: (Max Dim, Base, Max Z, Layer), in mm.
+    #
+    # Prima i default si applicavano solo ENTRANDO in Cover e Keychain, e non
+    # si tornava mai indietro: dopo un giro nel portachiavi la modalità
+    # Standard restava a 60 mm. Non è un dettaglio estetico — la copertura a
+    # 2 colori misura una finestra di 0,7 mm REALI, quindi a 60 mm quella
+    # finestra copre 14 px della sorgente invece di 4, e lo stesso pannello si
+    # binarizza tre volte più grosso. Il cursore era rimasto a 35%, l'immagine
+    # era la stessa, e il risultato cambiava senza che niente lo dicesse.
+    #
+    # Quindi la tabella copre TUTTE le modalità, non solo quelle che avevano
+    # un default speciale: cambiare modalità porta con sé la sua taglia, in
+    # entrambe le direzioni.
+    _PHYS_DEFAULTS = {
+        0: (200.0, 1.0, 2.4, 0.20),   # Standard
+        1: (200.0, 1.0, 2.4, 0.20),   # Topographic
+        2: (200.0, 4.0, 2.0, 0.20),   # Deckbox (Max Dim lo blocca _on_mode_changed)
+        3: (200.0, 1.0, 2.4, 0.20),   # Spot Color
+        4: (200.0, 0.3, 1.0, 0.10),   # Phone Cover: sede slim, layer fini
+        5: (60.0,  2.0, 3.2, 0.20),   # Keychain: taglia portachiavi, base robusta
+    }
+
     def _on_mode_defaults(self, index):
-        """Entrando in modalità Cover imposta i default 'slim' per la sede
-        della plate (spessore max ~1mm, layer fini per le bande colore)."""
-        if index == 4:
-            self.spin_base.setValue(0.3)
-            self.spin_maxh.setValue(1.0)
-            self.spin_layer_height.setValue(0.10)
-        elif index == 5:
-            # Un portachiavi non e' un pannello: 200 mm di default sarebbero
-            # un sottopentola. 60 mm e' la taglia da portachiavi, e la base
-            # sale a 2 mm perche' il pezzo va tirato per l'anellino.
-            self.spin_dim.setValue(60.0)
-            self.spin_base.setValue(2.0)
-            self.spin_maxh.setValue(3.2)
-            self.spin_layer_height.setValue(0.20)
+        """Porta i parametri fisici alla taglia della modalità scelta."""
+        dim, base, maxh, layer = self._PHYS_DEFAULTS.get(
+            index, self._PHYS_DEFAULTS[0])
+        self.spin_dim.setValue(dim)
+        self.spin_base.setValue(base)
+        self.spin_maxh.setValue(maxh)
+        self.spin_layer_height.setValue(layer)
 
     def _on_phone_model_changed(self, _index):
         preset = self._current_phone_preset() or {}
