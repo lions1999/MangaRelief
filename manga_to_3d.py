@@ -229,7 +229,13 @@ class Manga3DAppController(MainWindowUI):
         2: (200.0, 4.0, 2.0, 0.20),   # Deckbox (Max Dim lo blocca _on_mode_changed)
         3: (200.0, 1.0, 2.4, 0.20),   # Spot Color
         4: (200.0, 0.3, 1.0, 0.10),   # Phone Cover: sede slim, layer fini
-        5: (60.0,  2.0, 3.2, 0.20),   # Keychain: taglia portachiavi, base robusta
+        # Keychain. I due numeri hanno ragioni diverse e non vanno scambiati:
+        # la base regge lo strappo dell'anellino (8 layer bastano su un pezzo
+        # da 60 mm), il rilievo serve solo al colore e deve ospitare
+        # colori-1 bande da almeno 2 layer l'una — 1,2 mm e' il minimo che
+        # regge anche il caso peggiore, due accenti (2+2+2). Sotto, una banda
+        # scende a un layer e il colore sotto traspare.
+        5: (60.0,  1.6, 2.8, 0.20),
     }
 
     def _on_mode_defaults(self, index):

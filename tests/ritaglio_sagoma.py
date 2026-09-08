@@ -312,6 +312,21 @@ check("i controlli del ritaglio sono attivi senza altre spunte",
 check("entrando in modalita' Max Dim scende a taglia portachiavi",
       win.spin_dim.value() <= 80.0, f"{win.spin_dim.value()} mm")
 
+# L'altezza di default non e' un numero tondo scelto a occhio: il rilievo deve
+# ospitare colori-1 bande di colore, e una banda di un layer solo lascia
+# trasparire quello sotto. Il caso peggiore e' due accenti (4 colori), ed e'
+# quello che fissa il minimo — abbassare ancora il default lo romperebbe in
+# silenzio, perche' il file si genera comunque.
+from engine.mesh_utils import compute_topo_z_heights
+
+base, tot, lh = win.spin_base.value(), win.spin_maxh.value(), win.spin_layer_height.value()
+for n_colori in (2, 3, 4):
+    z = compute_topo_z_heights(base, tot, lh, n_colori)
+    layer = [round((z[i] - z[i - 1]) / lh) for i in range(1, n_colori)]
+    check(f"default portachiavi: a {n_colori} colori ogni banda ha almeno 2 layer",
+          layer and min(layer) >= 2,
+          f"base {base} + rilievo {tot-base:.1f} -> bande {layer}")
+
 win.btn_cutout_edit.setChecked(True)
 check("entrando in modifica l'anteprima si accende (i click si leggono li')",
       win.btn_cutout_preview.isChecked())
