@@ -524,3 +524,52 @@ def feature_scale(image: np.ndarray, mm_per_px: float, white_clip: int = 235,
 
     out['message'] = " — ".join(parts) + "."
     return out
+
+
+def thicken_ink(image: np.ndarray, thicken_mm: float, mm_per_px: float) -> np.ndarray:
+    """Ingrossa il tratto di `thicken_mm` millimetri, misurati in larghezza.
+
+    E' una erosione in scala di grigi, che e' il modo esatto di dire "fai
+    crescere lo scuro": il minimo su un intorno quadrato. Non tocca i livelli
+    — al contrario del contrasto, che sposta i grigi e lascia la geometria
+    dov'era, ed e' il motivo per cui alzare il contrasto non fa stampare un
+    tratto troppo sottile.
+
+    Il raggio del nucleo cresce il tratto di `raggio` pixel per lato, quindi la
+    larghezza aumenta del doppio: `thicken_mm` e' l'aumento TOTALE, cioe' il
+    numero che si legge accanto al tratto piu' fine in `feature_scale`.
+
+    Sull'RGB agisce canale per canale, quindi il nero dei contorni cresce
+    anche sopra le campiture colorate — che e' quello che serve, perche' e' il
+    contorno a dover reggere la stampa.
+
+    Ingrossare non e' gratis: dove i tratti sono piu' vicini di due volte
+    l'ingrossamento si fondono, e un tratteggio fitto diventa una campitura
+    piena. Non lo impediamo — su un retino di fumetto e' spesso l'esito
+    giusto, e comunque a quella scala i tratti separati non stamperebbero.
+    `feature_scale` misura anche i vuoti apposta per dirlo mentre si sceglie.
+    """
+    radius = _thicken_radius_px(thicken_mm, mm_per_px)
+    if radius < 1:
+        return image
+    k = 2 * radius + 1
+    return cv2.erode(np.ascontiguousarray(image), np.ones((k, k), np.uint8))
+
+
+def _thicken_radius_px(thicken_mm: float, mm_per_px: float) -> int:
+    if thicken_mm <= 0 or mm_per_px <= 0:
+        return 0
+    return int(round((float(thicken_mm) / 2.0) / float(mm_per_px)))
+
+
+def thicken_applied_mm(thicken_mm: float, mm_per_px: float) -> float:
+    """L'ingrossamento che si otterra' davvero, che non e' quello chiesto.
+
+    La dilatazione cresce di pixel interi, e un pixel della sorgente puo'
+    valere mezzo millimetro di stampa: chiedere +0,30 mm su una scansione da
+    550 px larga 60 mm significa o non ingrossare affatto o ingrossare di
+    0,50. Fra le due, quella da mostrare e' la seconda — un cursore che
+    dichiara un numero e ne applica un altro fa sembrare rotta la misura qui
+    accanto.
+    """
+    return 2.0 * _thicken_radius_px(thicken_mm, mm_per_px) * float(mm_per_px)

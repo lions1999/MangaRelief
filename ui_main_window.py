@@ -465,6 +465,20 @@ class MainWindowUI(QMainWindow):
         self.lbl_feature_scale.setVisible(False)
         form_layout.addRow("", self.lbl_feature_scale)
 
+        # Sta attaccato alla misura qui sopra, e non e' una scelta estetica:
+        # il cursore serve a far salire QUEL numero, e vederli insieme e'
+        # l'unico modo per sapere quanto ingrossare senza tirare a indovinare.
+        self.lbl_line_thicken = QLabel("Line thickening: off")
+        self.slider_line_thicken = QSlider(Qt.Orientation.Horizontal)
+        self.slider_line_thicken.setRange(0, 20)     # centesimi di mm x5 -> 0..1.00 mm
+        self.slider_line_thicken.setValue(0)
+        self.slider_line_thicken.setToolTip(
+            "Widens every stroke by this much, so linework too fine for the\n"
+            "nozzle becomes printable. Raising the contrast cannot do this:\n"
+            "it moves grey levels, not geometry.\n"
+            "Strokes closer together than this will merge into a solid area.")
+        form_layout.addRow(self.lbl_line_thicken, self.slider_line_thicken)
+
         self.spin_base = QDoubleSpinBox()
         self.spin_base.setRange(0.2, 10.0)  # min 0.2: le plate cover sono slim
         self.spin_base.setValue(1.0)
@@ -604,6 +618,7 @@ class MainWindowUI(QMainWindow):
             self.chk_auto_midtones, *self.swatches,
             self.slider_bw_coverage, self.btn_std_mockup,
             self.spin_dim, self.spin_base, self.spin_maxh, self.spin_layer_height,
+            self.slider_line_thicken,
             self.cmb_quality, self.chk_smart_decimate,
             self.spin_white_clip, self.btn_auto_white, self.spin_black_clip,
             self.chk_auto_z, self.slider_threshold,

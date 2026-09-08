@@ -16,7 +16,7 @@ from utils import resource_path
 from ui_main_window import MainWindowUI
 from engine import (GenerationMode, GenerationParams, ink_level,
                     prepare_source_image, standard_heightmap)
-from engine.color_utils import (extract_dominant_colors, suggest_midtones, feature_scale,
+from engine.color_utils import (extract_dominant_colors, suggest_midtones, feature_scale, thicken_ink, thicken_applied_mm,
                          suggest_spot_accents, classify_spot_pixels,
                          downsample_for_analysis, build_spot_palette,
                          grayscale_palette)
@@ -169,6 +169,11 @@ class Manga3DAppController(MainWindowUI):
             lambda _: self._refresh_feature_scale())
         self.slider_cutout_border.valueChanged.connect(
             lambda _: self._refresh_feature_scale())
+
+        # L'ingrossamento cambia la geometria che tutti guardano: la misura del
+        # tratto, la classificazione Standard e quella Spot. Non il ritaglio,
+        # che nel motore viene prima ed e' una domanda sulla sagoma.
+        self.slider_line_thicken.valueChanged.connect(self._on_line_thicken_changed)
         for _sp in (self.spin_z1, self.spin_z2, self.spin_z3):
             _sp.valueChanged.connect(lambda _: self._refresh_std_mockup())
 
@@ -415,7 +420,10 @@ class Manga3DAppController(MainWindowUI):
             return
         # Stessa risoluzione della generazione: a 800px fissi l'anteprima
         # mostrava più sgranatura di quella che sarebbe finita nel file
-        small = downsample_for_analysis(self.img_rgb_original, self._current_max_res_cap())
+        src = self._thickened(
+            self.img_rgb_original,
+            self.spin_dim.value() / max(self.img_rgb_original.shape[:2]))
+        small = downsample_for_analysis(src, self._current_max_res_cap())
         palette, idx = classify_spot_pixels(
             small, self._get_spot_accents(),
             coverage=self.slider_spot_coverage.value(),
@@ -473,6 +481,7 @@ class Manga3DAppController(MainWindowUI):
             color_mode=mode,
             color_changes_z=changes,
             bw_coverage=self._current_bw_coverage(),
+            line_thicken_mm=self._line_thicken_mm(),
         )
 
     def _current_bw_coverage(self):
@@ -523,7 +532,10 @@ class Manga3DAppController(MainWindowUI):
             return
 
         p = self._preview_params()
-        z = standard_heightmap(prepare_source_image(self.img_filtered_array, p), p)
+        src = self._thickened(
+            self.img_filtered_array,
+            p.max_dim / max(self.img_filtered_array.shape[:2]))
+        z = standard_heightmap(prepare_source_image(src, p), p)
 
         if p.color_mode == 2:
             toni = [p.sampled_values[0], p.sampled_values[3]]
@@ -805,6 +817,47 @@ class Manga3DAppController(MainWindowUI):
     # ------------------------------------------------------------------
     # QUANTO E' FINE IL TRATTO, A QUESTA DIMENSIONE
 
+    def _line_thicken_mm(self) -> float:
+        """Il cursore in millimetri di larghezza aggiunta (0 - 1,00 mm)."""
+        return self.slider_line_thicken.value() / 20.0
+
+    def _on_line_thicken_changed(self, _v):
+        # Il testo definitivo lo scrive _do_refresh_feature_scale, che e'
+        # l'unico posto dove si conosce il passo mm/pixel — e senza quello non
+        # si sa di quanto si ingrossera' davvero.
+        self._refresh_feature_scale()
+        self._refresh_std_mockup()
+        self._refresh_spot_mockup()
+
+    def _update_thicken_label(self, mm_per_px):
+        """Scrive l'ingrossamento REALE, non quello chiesto.
+
+        Fra i due c'e' l'arrotondamento a pixel interi della dilatazione, che
+        su una sorgente a bassa risoluzione vale piu' di mezzo millimetro:
+        mostrare il valore chiesto farebbe sembrare rotta la misura qui sotto,
+        che invece sta dicendo la verita' su un ingrossamento diverso.
+        """
+        mm = self._line_thicken_mm()
+        if mm <= 0:
+            self.lbl_line_thicken.setText("Line thickening: off")
+            return
+        reale = thicken_applied_mm(mm, mm_per_px) if mm_per_px else 0.0
+        self.lbl_line_thicken.setText(
+            f"Line thickening: +{mm:.2f} mm → none (under 1 px)" if reale <= 0
+            else f"Line thickening: +{reale:.2f} mm")
+
+    def _thickened(self, img, mm_per_px):
+        """L'immagine come la vedra' il motore dopo l'ingrossamento.
+
+        Le anteprime devono passare di qui, o mostrano una geometria che non
+        e' quella che verra' generata — ed e' proprio la geometria la cosa che
+        questo cursore cambia.
+        """
+        mm = self._line_thicken_mm()
+        if mm <= 0 or img is None or not mm_per_px:
+            return img
+        return thicken_ink(img, mm, mm_per_px)
+
     def _feature_scale_source(self):
         """L'immagine e il passo mm/pixel su cui misurare.
 
@@ -839,7 +892,10 @@ class Manga3DAppController(MainWindowUI):
         img, mm_per_px = self._feature_scale_source()
         if img is None:
             self.lbl_feature_scale.setVisible(False)
+            self._update_thicken_label(0.0)
             return
+        self._update_thicken_label(mm_per_px)
+        img = self._thickened(img, mm_per_px)
         try:
             info = feature_scale(img, mm_per_px,
                                  white_clip=self.spin_white_clip.value(),
@@ -1319,6 +1375,7 @@ class Manga3DAppController(MainWindowUI):
             color_mode=getattr(self, 'color_mode_state', 4),
             color_changes_z=color_changes_z,
             bw_coverage=self._current_bw_coverage(),
+            line_thicken_mm=self._line_thicken_mm(),
             topo_colors=topo_colors,
             spot_accents=self._get_spot_accents(),
             spot_coverage=self.slider_spot_coverage.value(),

@@ -36,6 +36,13 @@ class GenerationParams:
     max_res_cap: int = 1200         # cap risoluzione (Mesh Quality)
     smart_decimate: bool = True
 
+    # Ingrossamento del tratto, in mm di larghezza aggiunta. Serve dove il
+    # disegno ha linee piu' sottili di quanto l'ugello sappia stendere: il
+    # contrasto non le aiuta (sposta i grigi, non la geometria), una dilatazione
+    # si'. Applicata DOPO il ritaglio, perche' ingrossa l'arte e non la sagoma:
+    # la forma del pezzo la decide cutout_border_mm.
+    line_thicken_mm: float = 0.0
+
     # --- Calibrazione toni ---
     white_clip: int = 235
     black_clip: int = 15

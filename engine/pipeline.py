@@ -22,7 +22,7 @@ from .resources import asset_path
 from .mesh_utils import (standard_switch_z, create_solid_mesh, process_mesh_topo, export_3mf,
                          compute_topo_z_heights, compute_topo_switch_z)
 from .color_utils import (bw_coverage_map, classify_spot_pixels, downsample_for_analysis,
-                          quantize_grayscale_levels)
+                          quantize_grayscale_levels, thicken_ink)
 from .case_utils import (build_plate_raster, build_case_plate_raster,
                          compose_plate_art, build_bumper)
 from .cutout_utils import compute_cutout, crop, resize_mask
@@ -469,6 +469,18 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
         cutout_mask = crop(cut.mask, cut.bbox)
         img_work = _crop_source_to(img_work, cut.bbox, cut.mask.shape[:2])
         cutout_pieces, cutout_ring_ok = cut.n_pieces, cut.ring_attached
+        check_cancel()
+
+    # Ingrossamento del tratto, dopo l'eventuale ritaglio e prima di ogni
+    # classificazione. L'ordine non e' indifferente: il passo mm/pixel si
+    # conosce solo qui, perche' dipende dall'immagine che il pezzo occupa
+    # davvero — che dopo il ritaglio non e' piu' il foglio di partenza. E
+    # ingrossare qui significa ingrossare l'ARTE, non la sagoma: quella la
+    # decide cutout_border_mm, che e' un'altra domanda.
+    if p.line_thicken_mm > 0 and not p.is_cover_mode:
+        emit(7, "🖊 Thickening linework...")
+        pitch = p.max_dim / max(img_work.shape[0], img_work.shape[1])
+        img_work = thicken_ink(img_work, p.line_thicken_mm, pitch)
         check_cancel()
 
     if p.is_cover_mode and p.cover_preset:
