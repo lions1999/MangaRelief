@@ -295,12 +295,21 @@ def add_ring(mask: np.ndarray, cx: float, cy: float, hole_r_px: float,
              rim_px: float) -> Tuple[np.ndarray, np.ndarray, bool]:
     """Aggiunge l'occhiello: una corona di materiale meno il foro.
 
-    Ritorna anche la corona stessa, e non e' un di piu': la sagoma dice solo
-    DOVE c'e' materiale, l'altezza gliela da' la classificazione del disegno
-    sotto — e sotto la corona, quando sporge dal soggetto, c'e' carta bianca.
-    Ne esce un anello alto un layer, cioe' la parte piu' fragile del pezzo
-    messa esattamente dove lo si tira. Chi chiama usa questa maschera per
-    dipingerla come inchiostro, e allora sale a tutta altezza col tratto.
+    Ritorna anche la parte di corona che l'anello ha AGGIUNTO, cioe' quella
+    che prima era vuoto. E' la maschera con cui chi chiama la dipinge come
+    inchiostro, e il fatto che sia l'aggiunta e non tutta la corona e' cio' che
+    rende inutile una spunta "occhiello interno / esterno".
+
+    La sagoma dice solo DOVE c'e' materiale; l'altezza gliela da' la
+    classificazione del disegno sotto. Se l'anello sporge dal soggetto, sotto
+    c'e' carta bianca e ne esce un anello alto un layer — la parte piu' fragile
+    del pezzo messa esattamente dove lo si tira: va dipinta. Se invece
+    l'anello cade dentro il disegno, sotto c'e' gia' l'arte con le sue quote, e
+    dipingerla cancellerebbe i dettagli attorno al foro.
+
+    Sono la stessa regola guardata da due lati, e per-pixel copre anche il caso
+    che una spunta non saprebbe dire: l'anello a cavallo del bordo, dove va
+    dipinta la meta' che sporge e lasciata stare quella che sta dentro.
 
     Ritorna inoltre se l'occhiello e' rimasto attaccato al pezzo. Non lo
     aggiusta da solo: spostarlo di autorita' sarebbe peggio che dirlo, perche'
@@ -315,7 +324,7 @@ def add_ring(mask: np.ndarray, cx: float, cy: float, hole_r_px: float,
     # di unire, altrimenti la risposta e' sempre si'.
     attached = bool((corona & mask).any())
 
-    return (mask | boss) & ~hole, corona, attached
+    return (mask | boss) & ~hole, corona & ~mask, attached
 
 
 def mask_bbox(mask: np.ndarray, pad: int = 0) -> Optional[Tuple[int, int, int, int]]:
@@ -364,8 +373,10 @@ class CutoutResult:
     pitch_mm: float = 0.0              # mm per pixel del raster segmentazione
     n_pieces: int = 0                  # tronconi trovati prima dello scarto
     ring_attached: bool = True
-    # La corona dell'occhiello, gia' intersecata con la sagoma finale: serve a
-    # chi genera per dipingerla come inchiostro e portarla a tutta altezza.
+    # La parte di corona che l'occhiello ha AGGIUNTO al vuoto, gia' intersecata
+    # con la sagoma finale: serve a chi genera per dipingerla come inchiostro e
+    # portarla a tutta altezza. Dove l'anello cade dentro il disegno e' vuota,
+    # ed e' cosi' che l'arte attorno al foro resta con le sue quote.
     ring_mask: Optional[np.ndarray] = None
     empty: bool = False
 

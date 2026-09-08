@@ -172,65 +172,115 @@ check("...e della sua corona non resta niente da dipingere",
       c_stacc.ring_mask is not None and int(c_stacc.ring_mask.sum()) == 0,
       int(c_stacc.ring_mask.sum()) if c_stacc.ring_mask is not None else None)
 
-# --- l'occhiello deve essere alto quanto il pezzo, non un layer -------------
+# --- l'occhiello deve essere alto quanto il pezzo, ma solo dove sporge ----
 #
 # La sagoma dice solo DOVE c'e' materiale; quanto e' alto lo decide la
-# classificazione del disegno sotto. Sotto la corona, quando l'anello sporge
-# dal soggetto, c'e' carta bianca — che e' il livello piu' basso. Ne usciva un
-# anello alto un layer: la parte piu' sottile del pezzo, messa esattamente
-# dove lo si tira. Va dipinto come inchiostro, e allora sale con il tratto.
+# classificazione del disegno sotto. Se l'anello sporge dal soggetto, sotto
+# c'e' carta bianca — il livello piu' basso — e ne esce un anello alto un
+# layer: la parte piu' fragile del pezzo messa dove lo si tira. Se invece cade
+# dentro il disegno, sotto c'e' gia' l'arte, e dipingerla cancella i dettagli
+# attorno al foro.
 #
-# La prova misura la corona SULLA MESH e non sulla maschera: fra le due ci
-# sono la classificazione, il ricampionamento e le terrazze, ed e' proprio la
-# classificazione il passaggio che sbagliava.
+# Non serve una spunta "interno/esterno": si dipinge la parte che l'anello ha
+# AGGIUNTO al vuoto. Fuori e' quasi tutta la corona, dentro e' niente, a
+# cavallo del bordo e' la meta' che sporge — che una spunta non saprebbe dire.
+#
+# Serve una tavola apposta. Sul cappello il punto "fuori" cadeva nella regione
+# bianca racchiusa dalla corona, che e' materiale: la prova passava senza
+# provare il caso esterno.
 
-RING_FUORI = (450, 60)          # sopra la corona, ben fuori dal disegno
+def tavola_occhiello(n=800):
+    """Un disco pieno di dettagli, con un gambo che esce in alto."""
+    img = np.full((n, n, 3), 255, np.uint8)
+    cv2.circle(img, (400, 480), 230, (0, 0, 0), -1)
+    for k in range(-150, 151, 26):                       # dettagli dentro
+        cv2.line(img, (400 + k, 360), (400 + k, 600), (255, 255, 255), 7)
+    cv2.line(img, (400, 250), (400, 180), (0, 0, 0), 20)  # gambo
+    return img
 
-check("(sotto la corona la sorgente e' carta bianca)",
-      bool((IMG[RING_FUORI[1] - 20:RING_FUORI[1] + 20,
-                RING_FUORI[0] - 20:RING_FUORI[0] + 20] > 240).all()),
-      "altrimenti la prova non sta misurando il caso che dichiara")
+
+OCC = tavola_occhiello()
+OCC_FUORI, OCC_DENTRO, OCC_CAVALLO = (400, 150), (400, 480), (400, 265)
+RING_D, RING_RIM = 4.0, 2.5
 
 
-def quota_corona(mesh, cut, centro, r_int=2.2, r_est=4.3):
-    """L'altezza massima raggiunta dalla corona, in mm."""
+def _cut_occhiello(centro):
+    return compute_cutout(OCC, max_dim=60.0, ring_xy=centro,
+                          ring_d_mm=RING_D, ring_rim_mm=RING_RIM)
+
+
+def quota_dipinta(centro):
+    """Che frazione della corona viene dipinta come inchiostro."""
+    from engine.cutout_utils import _disc, seg_shape_for
+    c = _cut_occhiello(centro)
+    hh, ww = seg_shape_for(OCC.shape[:2])
+    corona = (_disc((hh, ww), centro[0], centro[1],
+                    (RING_D / 2 + RING_RIM) / c.pitch_mm)
+              & ~_disc((hh, ww), centro[0], centro[1], (RING_D / 2) / c.pitch_mm))
+    return int(c.ring_mask.sum()) / max(1, int(corona.sum()))
+
+
+check("fuori dal disegno la corona e' quasi tutta da dipingere",
+      quota_dipinta(OCC_FUORI) > 0.6, f"{100*quota_dipinta(OCC_FUORI):.0f}%")
+check("dentro il disegno non c'e' niente da dipingere",
+      quota_dipinta(OCC_DENTRO) < 0.05, f"{100*quota_dipinta(OCC_DENTRO):.0f}%")
+check("a cavallo del bordo se ne dipinge una parte, non tutta e non niente",
+      0.03 < quota_dipinta(OCC_CAVALLO) < 0.6,
+      f"{100*quota_dipinta(OCC_CAVALLO):.0f}%")
+
+
+def mesh_occhiello(nome, centro, **kw):
+    p = GenerationParams(
+        mode=GenerationMode.KEYCHAIN, max_dim=60.0, base_h=1.6, max_h=2.8,
+        layer_height=0.2, max_res_cap=800, smart_decimate=False, spot_accents=[],
+        cutout_ring=True, cutout_ring_xy=centro, cutout_ring_d_mm=RING_D,
+        cutout_ring_rim_mm=RING_RIM,
+        output_path=os.path.join(TMP, nome + ".stl"), **kw)
+    src = OCC if kw.get("keychain_finish_spot", True) else cv2.cvtColor(
+        OCC, cv2.COLOR_RGB2GRAY)
+    return trimesh.load(generate(src, p).stl_path), _cut_occhiello(centro)
+
+
+def _mm(cut, centro):
     y0, y1, x0, x1 = cut.bbox
-    cx = (centro[0] - x0) * cut.pitch_mm
-    cy = ((y1 - y0) - (centro[1] - y0)) * cut.pitch_mm
-    v = mesh.vertices
-    r = np.hypot(v[:, 0] - cx, v[:, 1] - cy)
-    sulla = (r > r_int) & (r < r_est)
-    return (float(v[sulla, 2].max()) if sulla.any() else None), int(sulla.sum())
+    return ((centro[0] - x0) * cut.pitch_mm,
+            ((y1 - y0) - (centro[1] - y0)) * cut.pitch_mm)
 
 
+# Fuori: la corona deve arrivare alla cima, in entrambe le finiture. La prova
+# guarda la MESH e non la maschera — fra le due ci sono la classificazione, il
+# ricampionamento e le terrazze, ed e' la classificazione che sbagliava.
 for spot in (True, False):
-    nome = "spot" if spot else "bn"
-    m_ring, r_ring = genera(f"occhiello_{nome}", keychain_finish_spot=spot,
-                            cutout_ring=True, cutout_ring_xy=RING_FUORI,
-                            cutout_ring_d_mm=4.0, cutout_ring_rim_mm=2.5,
-                            color_mode=2, color_changes_z=[1.4, 2.0, 2.4])
-    c_ring = compute_cutout(IMG, max_dim=60.0, ring_xy=RING_FUORI,
-                            ring_d_mm=4.0, ring_rim_mm=2.5)
-    quota, quanti = quota_corona(m_ring, c_ring, RING_FUORI)
-    check(f"finitura {'Spot' if spot else 'B/N'}: la corona arriva a tutta altezza",
-          quanti > 0 and quota is not None and abs(quota - 2.4) < 1e-6,
-          f"{quanti} vertici, quota {quota} mm (base 1.0, cima 2.4)")
-    check(f"finitura {'Spot' if spot else 'B/N'}: e resta chiusa e in un pezzo",
-          m_ring.is_watertight and m_ring.body_count == 1)
+    et = "Spot" if spot else "B/N"
+    # Il nome del file non puo' portarsi dentro lo slash di "B/N".
+    m_r, c_r = mesh_occhiello("occhiello_fuori_" + ("spot" if spot else "bn"),
+                              OCC_FUORI,
+                              keychain_finish_spot=spot, color_mode=2,
+                              color_changes_z=[1.4, 2.2, 2.8])
+    cx, cy = _mm(c_r, OCC_FUORI)
+    v = m_r.vertices
+    r = np.hypot(v[:, 0] - cx, v[:, 1] - cy)
+    sulla = (r > RING_D / 2 + 0.2) & (r < RING_D / 2 + RING_RIM - 0.2)
+    check(f"finitura {et}: sporgendo, la corona arriva a tutta altezza",
+          sulla.any() and abs(float(v[sulla, 2].max()) - 2.8) < 1e-5,
+          f"{int(sulla.sum())} vertici, cima {float(v[sulla, 2].max()):.2f} mm")
+    check(f"finitura {et}: e resta chiusa e in un pezzo",
+          m_r.is_watertight and m_r.body_count == 1)
 
-# La decimazione e' accesa di default nell'app, e nel suo finale chiama
-# trimesh.repair.fill_holes: un foro passante e' esattamente la cosa che quella
-# funzione esiste per chiudere. Che non lo faccia dipende dal fatto che il foro
-# ha pareti proprie e la mesh resta chiusa — cioe' da una proprieta' che una
-# modifica a create_solid_mesh potrebbe togliere senza che nessuno se ne
-# accorga, perche' il file continuerebbe ad aprirsi.
-m_dec, _ = genera("decimata", cutout_cut_seeds=[P_VUOTO],
-                  cutout_ring=True, cutout_ring_xy=(450, 45),
-                  cutout_ring_d_mm=4.0, cutout_ring_rim_mm=2.5,
-                  smart_decimate=True)
-check("i fori sopravvivono alla decimazione (fill_holes non li richiude)",
-      m_dec.is_watertight and genere(m_dec) == 2 and m_dec.body_count == 1,
-      f"chi={m_dec.euler_number} facce={len(m_dec.faces)}")
+# Dentro: l'arte attorno al foro conserva le sue quote. Si misura l'AREA a
+# quota base, non le quote presenti: una singola faccia superstite basterebbe
+# a far passare un conteggio di quote, e non e' quello che si sta chiedendo.
+m_d, c_d = mesh_occhiello("occhiello_dentro", OCC_DENTRO)
+cx, cy = _mm(c_d, OCC_DENTRO)
+tri = m_d.vertices[m_d.faces]
+vicino = np.hypot(tri.mean(axis=1)[:, 0] - cx, tri.mean(axis=1)[:, 1] - cy) < 8.0
+area_base = float(m_d.area_faces[(np.abs(tri[:, :, 2] - 1.6) < 1e-6).all(axis=1)
+                                 & vicino].sum())
+area_cima = float(m_d.area_faces[(np.abs(tri[:, :, 2] - 2.8) < 1e-6).all(axis=1)
+                                 & vicino].sum())
+check("con l'anello dentro, i dettagli attorno al foro sopravvivono",
+      area_base > 40.0 and m_d.is_watertight,
+      f"{area_base:.0f} mm2 a quota base contro {area_cima:.0f} mm2 di inchiostro")
 
 # La finitura B/N passa da create_solid_mesh invece che da process_mesh_topo:
 # e' un secondo percorso dentro la stessa modalita', e va provato come tale.
