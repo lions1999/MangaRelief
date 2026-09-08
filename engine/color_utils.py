@@ -431,6 +431,10 @@ def bw_coverage_map(gray: np.ndarray, target_wh, window_px: int,
 NOZZLE_MM = 0.4
 # Due tracce: sopra, il tratto e' una parete che regge davvero.
 SOLID_MM = 0.8
+# ...ma entrambe sono il diametro dell'ugello e il suo doppio, non due numeri
+# indipendenti: con un ugello da 0,2 il limite si dimezza, e un disegno che a
+# 0,4 chiedeva 370 mm ne chiede 185. Le costanti restano come default per chi
+# non passa niente.
 
 
 def _thinnest_mm(binary: np.ndarray, mm_per_px: float, percentile: float,
@@ -475,7 +479,8 @@ def _thinnest_mm(binary: np.ndarray, mm_per_px: float, percentile: float,
 
 def feature_scale(image: np.ndarray, mm_per_px: float, white_clip: int = 235,
                   percentile: float = 10.0, min_area_px: int = 12,
-                  max_dim_mm: Optional[float] = None) -> dict:
+                  max_dim_mm: Optional[float] = None,
+                  nozzle_mm: float = NOZZLE_MM) -> dict:
     """Quanto misurano, in mm di stampa, il tratto piu' fine e il vuoto piu' stretto.
 
     `mm_per_px` va calcolato sull'immagine che il motore ricevera' davvero: in
@@ -497,8 +502,12 @@ def feature_scale(image: np.ndarray, mm_per_px: float, white_clip: int = 235,
         gray = cv2.cvtColor(np.ascontiguousarray(gray, np.uint8), cv2.COLOR_RGB2GRAY)
     ink = gray < int(white_clip)
 
+    nozzle_mm = float(nozzle_mm)
+    solid_mm = 2.0 * nozzle_mm
+
     out = {
         'mm_per_px': float(mm_per_px),
+        'nozzle_mm': nozzle_mm,
         'ink_mm': _thinnest_mm(ink, mm_per_px, percentile, min_area_px),
         'gap_mm': _thinnest_mm(~ink, mm_per_px, percentile, min_area_px),
         'min_dim_mm': None,
@@ -515,23 +524,23 @@ def feature_scale(image: np.ndarray, mm_per_px: float, white_clip: int = 235,
     # lineare, quindi e' una proporzione: il rapporto fra le due larghezze.
     riferimento = (float(max_dim_mm) if max_dim_mm
                    else max(image.shape[0], image.shape[1]) * mm_per_px)
-    out['min_dim_mm'] = riferimento * (SOLID_MM / ink_mm)
+    out['min_dim_mm'] = riferimento * (solid_mm / ink_mm)
 
     parts = [f"Finest stroke {ink_mm:.2f} mm"]
-    if ink_mm < NOZZLE_MM:
+    if ink_mm < nozzle_mm:
         out['ok'] = False
-        parts.append(f"below the {NOZZLE_MM:.1f} mm nozzle: it will merge or "
+        parts.append(f"below the {nozzle_mm:.2f} mm nozzle: it will merge or "
                      f"vanish. Needs ≥ {out['min_dim_mm']:.0f} mm to print as drawn")
-    elif ink_mm < SOLID_MM:
+    elif ink_mm < solid_mm:
         out['ok'] = False
-        parts.append(f"printable but fragile. {SOLID_MM:.1f} mm at "
+        parts.append(f"printable but fragile. {solid_mm:.2f} mm at "
                      f"≥ {out['min_dim_mm']:.0f} mm")
     else:
         parts.append("prints as a solid wall")
 
     # Il vuoto conta solo se c'e': un disegno di sole campiture piene non ha
     # tratti vicini da fondere, e avvertirlo sarebbe rumore.
-    if gap_mm is not None and gap_mm < NOZZLE_MM:
+    if gap_mm is not None and gap_mm < nozzle_mm:
         out['ok'] = False
         parts.append(f"gaps {gap_mm:.2f} mm — nearby strokes will merge into a "
                      f"solid area")

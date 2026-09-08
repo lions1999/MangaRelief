@@ -33,6 +33,11 @@ class GenerationParams:
     base_h: float = 1.0             # spessore della base, in mm
     max_h: float = 2.4              # altezza totale, in mm
     layer_height: float = 0.2       # altezza layer di stampa, in mm
+    # Il diametro dell'ugello non e' una preferenza: e' la larghezza minima di
+    # qualunque parete, quindi decide sia cosa il disegno puo' contenere
+    # (feature_scale) sia cosa dichiara il 3MF. Era cablato a 0,4 in entrambi i
+    # posti, e su una macchina da 0,2 sbagliava di un fattore due in entrambi.
+    nozzle_mm: float = 0.4
     max_res_cap: int = 1200         # cap risoluzione (Mesh Quality)
     smart_decimate: bool = True
 

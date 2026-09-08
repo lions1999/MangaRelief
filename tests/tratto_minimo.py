@@ -193,6 +193,53 @@ check("l'etichetta avvisa in piccolo e tace in grande",
       f"{stato_piccolo!r} -> {stato_grande!r}")
 check("ed e' visibile appena c'e' un'immagine", win.lbl_feature_scale.isVisible())
 
+# Un layer piu' alto di ~80% dell'ugello non aderisce: e' il caso in cui si
+# finisce montando un ugello fine e lasciando i layer di prima. Nessuno lo
+# vieta, ma nessuno lo dice nemmeno, e sul pezzo si vede solo dopo.
+for ugello, layer, atteso in ((0.4, 0.20, False), (0.2, 0.20, True),
+                              (0.2, 0.12, False), (0.6, 0.50, True)):
+    win.spin_nozzle.setValue(ugello)
+    win.spin_layer_height.setValue(layer)
+    check(f"ugello {ugello:.2f} con layer {layer:.2f}: "
+          f"{'avvisa' if atteso else 'tace'}",
+          win.lbl_layer_warn.isVisible() == atteso,
+          win.lbl_layer_warn.text() or "(nessun avviso)")
+win.spin_nozzle.setValue(0.4)
+win.spin_layer_height.setValue(0.20)
+
+
+# ---------------------------------------------------------------------------
+print("\n=== l'ugello non e' una costante ===")
+
+# NOZZLE_MM e SOLID_MM sono il diametro dell'ugello e il suo doppio, non due
+# numeri indipendenti: con un ugello da 0,2 il limite si dimezza. Era cablato a
+# 0,4, e su una macchina da 0,2 il consiglio sbagliava di un fattore due —
+# dicendo "servono 370 mm" a chi poteva stampare a 185.
+r04 = feature_scale(fine, 60.0 / W, max_dim_mm=60.0, nozzle_mm=0.4)
+r02 = feature_scale(fine, 60.0 / W, max_dim_mm=60.0, nozzle_mm=0.2)
+check("con un ugello dimezzato la dimensione richiesta si dimezza",
+      abs(r02['min_dim_mm'] * 2 - r04['min_dim_mm']) < 1.0,
+      f"0.4 -> {r04['min_dim_mm']:.0f} mm, 0.2 -> {r02['min_dim_mm']:.0f} mm")
+# Il ramo "sotto l'ugello" nomina l'ugello; quello "fragile" nomina il suo
+# doppio. Vanno verificati sul tratto che ci cade dentro, o si verifica l'altro.
+sottilissimo = tavola(1)
+check("il ramo 'sotto l'ugello' nomina l'ugello vero, non 0.4",
+      "0.20 mm nozzle" in feature_scale(sottilissimo, 60.0 / W,
+                                        max_dim_mm=60.0, nozzle_mm=0.2)['message'],
+      feature_scale(sottilissimo, 60.0 / W, nozzle_mm=0.2)['message'][:70])
+check("...e il ramo 'fragile' nomina il doppio dell'ugello",
+      "0.40 mm at" in r02['message'], r02['message'][:70])
+
+# Lo stesso tratto puo' essere fragile su un ugello e solido su un altro: e' il
+# punto per cui questo parametro esiste. Serve un tratto fra 0,4 e 0,8 mm —
+# 5 px a 0,098 mm/px fanno 0,49.
+medio = tavola(5)
+m04 = feature_scale(medio, 60.0 / W, max_dim_mm=60.0, nozzle_mm=0.4)
+m02 = feature_scale(medio, 60.0 / W, max_dim_mm=60.0, nozzle_mm=0.2)
+check("un tratto fragile a 0,4 puo' essere solido a 0,2",
+      not m04['ok'] and m02['ok'],
+      f"{m04['ink_mm']:.2f} mm -> 0.4:{m04['ok']} 0.2:{m02['ok']}")
+
 
 # ---------------------------------------------------------------------------
 print("\n=== ingrossare il tratto ===")

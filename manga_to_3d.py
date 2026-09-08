@@ -85,6 +85,7 @@ class Manga3DAppController(MainWindowUI):
         self.update_swatch_colors()
         self._refresh_auto_z_display()
         self._on_auto_z_toggled(True)
+        self._check_layer_vs_nozzle()
 
     def setup_connections(self):
         self.btn_load.clicked.connect(self.load_image)
@@ -162,6 +163,9 @@ class Manga3DAppController(MainWindowUI):
         # pezzo e da cosa conta come inchiostro, quindi si rifa' quando cambia
         # una delle due — e al cambio di modalita', che le cambia entrambe.
         self.spin_dim.valueChanged.connect(lambda _: self._refresh_feature_scale())
+        self.spin_nozzle.valueChanged.connect(lambda _: self._refresh_feature_scale())
+        self.spin_nozzle.valueChanged.connect(lambda _: self._check_layer_vs_nozzle())
+        self.spin_layer_height.valueChanged.connect(lambda _: self._check_layer_vs_nozzle())
         self.spin_white_clip.valueChanged.connect(lambda _: self._refresh_feature_scale())
         self.mode_selector.currentIndexChanged.connect(
             lambda _: self._refresh_feature_scale())
@@ -530,6 +534,7 @@ class Manga3DAppController(MainWindowUI):
             base_h=self.spin_base.value(),
             max_h=self.spin_maxh.value(),
             layer_height=self.spin_layer_height.value(),
+            nozzle_mm=self.spin_nozzle.value(),
             max_res_cap=self._current_max_res_cap(),
             white_clip=self.spin_white_clip.value(),
             black_clip=self.spin_black_clip.value(),
@@ -884,6 +889,26 @@ class Manga3DAppController(MainWindowUI):
         self._refresh_std_mockup()
         self._refresh_spot_mockup()
 
+    def _check_layer_vs_nozzle(self):
+        """Un layer piu' alto di ~80% dell'ugello non aderisce bene.
+
+        E' il caso in cui si finisce montando un ugello fine e lasciando i
+        layer di prima: 0,20 mm su un ugello da 0,20 e' il 100%, e l'estrusore
+        non ha materiale per schiacciare il giro su quello sotto.
+        """
+        ugello, layer = self.spin_nozzle.value(), self.spin_layer_height.value()
+        limite = 0.8 * ugello
+        troppo = layer > limite + 1e-9
+        self.lbl_layer_warn.setVisible(troppo)
+        self.lbl_layer_warn.setText("")
+        if troppo:
+            self.lbl_layer_warn.setText(
+                f"⚠ Layer {layer:.2f} mm is {layer/ugello:.0%} of a {ugello:.2f} mm "
+                f"nozzle. Stay at or below {limite:.2f} mm for proper adhesion.")
+        self.lbl_layer_warn.setProperty("state", "warn" if troppo else "")
+        self.lbl_layer_warn.style().unpolish(self.lbl_layer_warn)
+        self.lbl_layer_warn.style().polish(self.lbl_layer_warn)
+
     def _update_thicken_label(self, mm_per_px):
         """Scrive l'ingrossamento REALE, non quello chiesto.
 
@@ -954,7 +979,8 @@ class Manga3DAppController(MainWindowUI):
         try:
             info = feature_scale(img, mm_per_px,
                                  white_clip=self.spin_white_clip.value(),
-                                 max_dim_mm=self.spin_dim.value())
+                                 max_dim_mm=self.spin_dim.value(),
+                                 nozzle_mm=self.spin_nozzle.value())
         except Exception as e:          # una misura non deve mai fermare la UI
             print(f"Warning: feature scale not computed ({e})")
             self.lbl_feature_scale.setVisible(False)
@@ -1427,6 +1453,7 @@ class Manga3DAppController(MainWindowUI):
             base_h=base_h,
             max_h=max_h,
             layer_height=self.spin_layer_height.value(),
+            nozzle_mm=self.spin_nozzle.value(),
             max_res_cap=max_res_cap,
             smart_decimate=self.chk_smart_decimate.isChecked(),
             white_clip=self.spin_white_clip.value(),

@@ -149,6 +149,18 @@ for colori in (2, 3, 4):
 print("--- i profili di chi apre ---")
 
 cfg_ultimo = json.loads(zipfile.ZipFile(r.mf3_path).read("Metadata/project_settings.config"))
+# L'ugello dichiarato deve essere quello scelto: era cablato a 0,4, e chi ne ha
+# uno diverso si trovava nel progetto un valore che non e' il suo.
+for _n in (0.2, 0.6):
+    _p = GenerationParams(mode=GenerationMode.STANDARD, max_dim=60.0, base_h=1.0,
+                          max_h=2.4, layer_height=0.1, nozzle_mm=_n,
+                          max_res_cap=400, smart_decimate=False,
+                          output_path_3mf=os.path.join(d, f"ug{_n}.3mf"))
+    _c = json.loads(zipfile.ZipFile(generate(img, _p).mf3_path)
+                    .read("Metadata/project_settings.config"))
+    check(f"il 3MF dichiara l'ugello scelto ({_n} mm)",
+          _c["nozzle_diameter"] == [f"{_n:g}"], _c["nozzle_diameter"])
+
 check("non dichiariamo nomi di profilo (quindi Bambu ne inventa uno col nome del file)",
       not any(k.endswith("_settings_id") for k in cfg_ultimo),
       [k for k in cfg_ultimo if k.endswith("_settings_id")] or sorted(cfg_ultimo))

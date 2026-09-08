@@ -499,7 +499,8 @@ _CUSTOM_GCODE_TPL = """\
 </custom_gcodes_per_layer>"""
 
 def export_3mf(mesh, output_path_3mf, color_changes_z, slot_colors=None,
-               object_name="geometry_0", palette_hex=None, layer_height=0.2):
+               object_name="geometry_0", palette_hex=None, layer_height=0.2,
+               nozzle_mm=0.4):
     """Scrive un 3MF che Bambu Studio apre come progetto, non come geometria.
 
     La geometria la serializza trimesh — non c'e' ragione di riscrivere un
@@ -580,7 +581,7 @@ def export_3mf(mesh, output_path_3mf, color_changes_z, slot_colors=None,
         "version": _PROJECT_VERSION,
         "from": "project",
         "name": "project_settings",
-        "nozzle_diameter": [_DEFAULT_NOZZLE],
+        "nozzle_diameter": [f"{float(nozzle_mm):g}"],
         "filament_colour": palette,
         "layer_height": str(layer_height),
         "initial_layer_print_height": str(layer_height),

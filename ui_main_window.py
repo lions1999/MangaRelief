@@ -497,6 +497,29 @@ class MainWindowUI(QMainWindow):
         self.spin_layer_height.setSingleStep(0.01)
         form_layout.addRow("Printing Layer Height (mm):", self.spin_layer_height)
 
+        # Il diametro dell'ugello non e' una preferenza estetica: e' la
+        # larghezza minima di qualunque parete, quindi decide che dettaglio il
+        # disegno puo' contenere. Era cablato a 0,4 sia nella misura del tratto
+        # sia nel 3MF, e su una macchina da 0,2 sbagliava di un fattore due.
+        self.spin_nozzle = QDoubleSpinBox()
+        self.spin_nozzle.setRange(0.1, 1.2)
+        self.spin_nozzle.setValue(0.40)
+        self.spin_nozzle.setSingleStep(0.1)
+        self.spin_nozzle.setDecimals(2)
+        self.spin_nozzle.setToolTip(
+            "Your printer's nozzle. Sets the minimum printable stroke width\n"
+            "reported below, and goes into the 3MF.")
+        form_layout.addRow("Nozzle (mm):", self.spin_nozzle)
+
+        # Un layer piu' alto di ~80%% dell'ugello non aderisce bene: l'estrusore
+        # non ha materiale per schiacciarlo sul giro sotto. E' il caso in cui si
+        # finisce mettendo un ugello fine e lasciando i layer di prima.
+        self.lbl_layer_warn = QLabel("")
+        self.lbl_layer_warn.setObjectName("lbl_feature_scale")
+        self.lbl_layer_warn.setWordWrap(True)
+        self.lbl_layer_warn.setVisible(False)
+        form_layout.addRow("", self.lbl_layer_warn)
+
         self.cmb_quality = QComboBox()
         self.cmb_quality.addItems(["Draft (800px)", "Standard (1200px)", "Ultra (1600px)"])
         self.cmb_quality.setCurrentIndex(1)
@@ -618,7 +641,7 @@ class MainWindowUI(QMainWindow):
             self.chk_auto_midtones, *self.swatches,
             self.slider_bw_coverage, self.btn_std_mockup,
             self.spin_dim, self.spin_base, self.spin_maxh, self.spin_layer_height,
-            self.slider_line_thicken,
+            self.spin_nozzle, self.slider_line_thicken,
             self.cmb_quality, self.chk_smart_decimate,
             self.spin_white_clip, self.btn_auto_white, self.spin_black_clip,
             self.chk_auto_z, self.slider_threshold,
