@@ -53,6 +53,7 @@ Qt widget tests must run with `QT_QPA_PLATFORM=offscreen` and **must call `win.s
   `_refresh_color_mode`, che e' gia' il punto in cui il pannello cambia forma
   con la modalita'; fuori dai 2 colori `_current_bw_coverage()` restituisce
   `None`, che nel motore e' la strada di sempre.
+- **L'anteprima "caotica" su una tavola retinata non e' un difetto della classificazione**: e' il retino, e la scelta automatica fra 2/3/4 colori (`_refresh_color_mode`) guarda **solo l'istogramma** — e' l'unico anello della catena che non sa quanto sara' grande il pezzo. Misurato sulla stessa tavola: 1388 punti che a 200 mm misurano 0,33 mm e a 60 mm ne misurano 0,10, cioe' sotto l'ugello; a 2 colori la copertura li ricompatta in **un** tono pieno. `_do_refresh_feature_scale` nomina quel rimedio quando `ink_mm < nozzle_mm` e la modalita' colore e' 3 o 4 — la condizione guarda il tratto e non `ok`, che cade anche solo per i vuoti stretti (che un retino ha per definizione, anche quando stampa benissimo). Prove in `tests/tratto_minimo.py`.
 - **`btn_std_mockup`** — l'anteprima della classificazione Standard, gemella di
   quella Spot: stesso schema (pulsante bistabile, timer da 180 ms, `setImage`
   sul viewer). Esegue `prepare_source_image` + `standard_heightmap` e dipinge

@@ -339,6 +339,103 @@ check("nella mesh generata l'inchiostro cresce davvero", a1 > a0 * 1.8,
       f"{a0:.0f} -> {a1:.0f} mm2")
 
 
+# ---------------------------------------------------------------------------
+print("\n=== il retino: perche' l'anteprima esce caotica ===")
+
+# Un retino non e' un difetto: e' inchiostro vero, e a 200 mm i suoi punti
+# misurano 1 mm e stampano. A 60 mm ne misurano 0,3 e diventano centinaia di
+# frammenti sotto l'ugello — l'anteprima "caotica". La scelta automatica fra
+# 2, 3 e 4 colori guarda solo l'istogramma, quindi decide uguale alle due
+# dimensioni: e' l'unico pezzo della catena che non sa quanto sara' grande il
+# pezzo, ed e' li' che nasce la sorpresa.
+#
+# La prova misura la differenza invece di descriverla, perche' e' l'unico modo
+# per accorgersi se un domani la copertura smettesse di compattare il retino.
+
+
+def con_retino(n=600, passo=7):
+    img = np.full((n, n), 252, np.uint8)
+    cv2.circle(img, (n // 2, int(n * 0.35)), int(n * 0.22), 0, 5)
+    for j in range(0, n, passo):
+        for i in range(0, n, passo):
+            x, y = i + (passo // 2 if (j // passo) % 2 else 0), j
+            if (x - n // 2) ** 2 + (y - int(n * 0.68)) ** 2 < int(n * 0.25) ** 2:
+                cv2.circle(img, (x, y), 2, 55, -1)
+    return cv2.GaussianBlur(img, (3, 3), 0)
+
+
+def frammenti(gray_posterizzata, mm_per_px):
+    """Quanti pezzi separati, e quanto misura il mediano in millimetri."""
+    ink = (gray_posterizzata < 128).astype(np.uint8)
+    n, _, st, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    if n <= 1:
+        return 0, 0.0
+    lati = np.sqrt(st[1:, cv2.CC_STAT_AREA]) * mm_per_px
+    return n - 1, float(np.median(lati))
+
+
+from engine import GenerationParams, GenerationMode, prepare_source_image  # noqa: E402
+
+retino = con_retino()
+
+
+def classifica(max_dim, colori, copertura=None):
+    p = GenerationParams(mode=GenerationMode.STANDARD, max_dim=max_dim,
+                         max_res_cap=1200, color_mode=colori,
+                         bw_coverage=copertura,
+                         sampled_values=[250, 210, 150, 15],
+                         color_changes_z=[1.4, 2.0, 2.4])
+    out = prepare_source_image(retino, p)
+    return frammenti(out, max_dim / max(out.shape))
+
+
+n200, lato200 = classifica(200.0, 4)
+n60, lato60 = classifica(60.0, 4)
+# Quanto misurano i punti dipende dalla frequenza del retino, che cambia da
+# tavola a tavola: asserire "a 200 mm stampano" vorrebbe dire fissare una
+# proprieta' della fixture. Quello che e' vero sempre e' che sono LO STESSO
+# disegno e scalano con la dimensione — stesso numero di frammenti, dimensione
+# proporzionale — ed e' per questo che una scelta presa sul solo istogramma non
+# puo' andare bene a entrambe le taglie.
+check("gli stessi punti scalano con la dimensione del pezzo",
+      n200 == n60 and abs(lato200 / lato60 - 200.0 / 60.0) < 0.15,
+      f"{n60} frammenti: {lato60:.2f} mm a 60, {lato200:.2f} mm a 200")
+check("a 60 mm cadono sotto l'ugello (l'anteprima caotica)",
+      lato60 < NOZZLE_MM, f"lato mediano {lato60:.2f} mm")
+
+n60c, lato60c = classifica(60.0, 2, copertura=0.35)
+check("a 2 colori la copertura ricompatta il retino in tono pieno",
+      n60c < n60 / 20 and lato60c > lato60 * 5,
+      f"{n60} frammenti da {lato60:.2f} mm -> {n60c} da {lato60c:.2f} mm")
+
+# ...e l'interfaccia deve nominare quel rimedio quando serve, e tacere quando
+# non serve: un avviso che compare sempre si impara a ignorare.
+win.mode_selector.setCurrentIndex(0)
+QFileDialog.getOpenFileName = staticmethod(
+    lambda *a, **k: (os.path.join(TMP, "retino.png"), ""))
+cv2.imwrite(os.path.join(TMP, "retino.png"), retino)
+win.load_image()
+win.slider_line_thicken.setValue(0)
+for md, colori, atteso in ((200.0, 4, False), (60.0, 4, True), (60.0, 2, False)):
+    win.spin_dim.setValue(md)
+    win.color_mode_state = colori
+    win._do_refresh_feature_scale()
+    dice = "2-Color mode" in win.lbl_feature_scale.text()
+    check(f"a {md:.0f} mm con {colori} colori: "
+          f"{'suggerisce i 2 colori' if atteso else 'tace'}",
+          dice == atteso, win.lbl_feature_scale.text()[-80:])
+
+# In Spot il selettore 2/3/4 colori non esiste, quindi il consiglio sarebbe
+# un'istruzione impossibile da eseguire.
+win.mode_selector.setCurrentIndex(3)
+win.spin_dim.setValue(60.0)
+win.color_mode_state = 4
+win._do_refresh_feature_scale()
+check("in Spot Color non lo suggerisce (li' quel controllo non c'e')",
+      "2-Color mode" not in win.lbl_feature_scale.text())
+win.mode_selector.setCurrentIndex(0)
+
+
 print()
 if fails:
     print(f"❌ {len(fails)} FALLITE: " + ", ".join(fails))

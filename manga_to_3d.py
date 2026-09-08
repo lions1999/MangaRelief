@@ -164,6 +164,7 @@ class Manga3DAppController(MainWindowUI):
         # una delle due — e al cambio di modalita', che le cambia entrambe.
         self.spin_dim.valueChanged.connect(lambda _: self._refresh_feature_scale())
         self.spin_nozzle.valueChanged.connect(lambda _: self._refresh_feature_scale())
+        self.slider_threshold.valueChanged.connect(lambda _: self._refresh_feature_scale())
         self.spin_nozzle.valueChanged.connect(lambda _: self._check_layer_vs_nozzle())
         self.spin_layer_height.valueChanged.connect(lambda _: self._check_layer_vs_nozzle())
         self.spin_white_clip.valueChanged.connect(lambda _: self._refresh_feature_scale())
@@ -877,6 +878,12 @@ class Manga3DAppController(MainWindowUI):
     # ------------------------------------------------------------------
     # QUANTO E' FINE IL TRATTO, A QUESTA DIMENSIONE
 
+    def _usa_pipeline_standard(self) -> bool:
+        """Se la classificazione passa dalla posterizzazione Standard, cioe'
+        se il selettore 2/3/4 colori conta qualcosa. In Topo e Spot no."""
+        idx = self.mode_selector.currentIndex()
+        return idx in (0, 2) or (idx == 5 and not self._keychain_spot())
+
     def _line_thicken_mm(self) -> float:
         """Il cursore in millimetri di larghezza aggiunta (0 - 1,00 mm)."""
         return self.slider_line_thicken.value() / 20.0
@@ -986,7 +993,29 @@ class Manga3DAppController(MainWindowUI):
             self.lbl_feature_scale.setVisible(False)
             return
 
-        self.lbl_feature_scale.setText(info['message'])
+        # Il rimedio che vale in QUESTA situazione, che il motore non puo'
+        # nominare perche' e' un controllo dell'interfaccia.
+        #
+        # Un retino non e' un difetto della misura: e' inchiostro vero, e a
+        # 200 mm i suoi punti misurano 1 mm e stampano. A 60 mm ne misurano
+        # 0,3 e diventano 1377 frammenti sotto l'ugello — l'anteprima
+        # "caotica". La scelta automatica fra 2, 3 e 4 colori guarda solo
+        # l'istogramma, quindi decide uguale alle due dimensioni; a 2 colori
+        # la copertura media su una finestra in millimetri e il retino
+        # ridiventa un tono pieno (2 frammenti invece di 1377, misurato).
+        # La condizione guarda il TRATTO e non `ok`: `ok` cade anche solo per i
+        # vuoti stretti, che un retino ha per definizione — a 200 mm quel
+        # pannello stampa benissimo a 4 colori e l'indizio sarebbe rumore.
+        # Lo speckle nasce quando e' l'inchiostro a non stare nell'ugello.
+        messaggio = info['message']
+        if (info.get('ink_mm') is not None
+                and info['ink_mm'] < info.get('nozzle_mm', 0.4)
+                and getattr(self, 'color_mode_state', 4) >= 3
+                and self._usa_pipeline_standard()):
+            messaggio += ("  At this size the halftone cannot resolve: 2-Color "
+                          "mode (Ink Coverage) reads it as a solid tone instead "
+                          "of speckle.")
+        self.lbl_feature_scale.setText(messaggio)
         self.lbl_feature_scale.setVisible(True)
         self.lbl_feature_scale.setProperty("state", "" if info['ok'] else "warn")
         self.lbl_feature_scale.style().unpolish(self.lbl_feature_scale)
