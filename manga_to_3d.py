@@ -1,5 +1,4 @@
 import sys
-import glob
 import os
 import time
 # pyrefly: ignore [missing-import]
@@ -1456,21 +1455,22 @@ class Manga3DAppController(MainWindowUI):
         if export_stl:
             output_dir_stl = os.path.join(base_dir, "output", "stl")
             os.makedirs(output_dir_stl, exist_ok=True)
-            save_path_stl = os.path.join(output_dir_stl, f"{file_stem}.stl")
             counter = 1
-            # In piatto il motore non scrive <stem>.stl ma uno STL per
-            # filamento (<stem>_f1_<colore>.stl, ...): il controllo
-            # anti-sovrascrittura deve guardare quelli, o il secondo giro
-            # riscriverebbe il primo.
-            flat = self._keychain_flat()
-
-            def _taken(path):
-                if flat:
-                    return bool(glob.glob(glob.escape(os.path.splitext(path)[0]) + "_f1_*.stl"))
-                return os.path.exists(path)
-            while _taken(save_path_stl):
-                save_path_stl = os.path.join(output_dir_stl, f"{file_stem}_{counter}.stl")
-                counter += 1
+            if self._keychain_flat():
+                # In piatto il motore scrive uno STL per filamento
+                # (<stem>_f1_<colore>.stl, ...): vanno insieme, quindi
+                # stanno in una cartella loro, <stem>/, numerata come i
+                # file quando esiste gia'. Il 3MF e' uno solo e resta dov'e'.
+                stem = file_stem
+                while os.path.exists(os.path.join(output_dir_stl, stem)):
+                    stem = f"{file_stem}_{counter}"
+                    counter += 1
+                save_path_stl = os.path.join(output_dir_stl, stem, f"{stem}.stl")
+            else:
+                save_path_stl = os.path.join(output_dir_stl, f"{file_stem}.stl")
+                while os.path.exists(save_path_stl):
+                    save_path_stl = os.path.join(output_dir_stl, f"{file_stem}_{counter}.stl")
+                    counter += 1
 
         save_path_3mf = None
         if export_3mf:

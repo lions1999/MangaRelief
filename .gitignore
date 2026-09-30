@@ -6,3 +6,5 @@ __pycache__/
 *.mp4
 debug_*.stl
 debug_*.png
+# i file generati dall'app, accanto all'immagine sorgente
+output/

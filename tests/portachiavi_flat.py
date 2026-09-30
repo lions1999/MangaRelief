@@ -329,6 +329,27 @@ check("il popup parla di AMS, non di cambi a quota",
       popup and "Flat AMS" in popup[-1] and "Color Changes" not in popup[-1],
       popup[-1][:80] if popup else None)
 
+# Gli STL piatti sono un set: una cartella per generazione, numerata come i
+# file. Il 3MF e' uno solo e resta in output/3mf.
+win.chk_export_stl.setChecked(True)
+cartelle = []
+for _ in range(2):
+    win.generate_stl()
+    win.worker.wait()
+    app.processEvents()
+    cartelle.append(os.path.dirname(win.worker.result.stl_paths[0]))
+stl_root = os.path.join(TMP, "output", "stl")
+check("gli STL piatti stanno in output/stl/<nome>/",
+      os.path.basename(cartelle[0]).startswith("medaglione_keychain_ams")
+      and os.path.dirname(cartelle[0]) == stl_root
+      and len(os.listdir(cartelle[0])) == len(win.worker.result.stl_paths) >= 2, (cartelle[0], os.listdir(cartelle[0])))
+check("la seconda generazione apre una cartella nuova, non sovrascrive",
+      cartelle[0] != cartelle[1] and len(os.listdir(cartelle[1])) == len(win.worker.result.stl_paths)
+      and all(os.path.basename(f).startswith(os.path.basename(cartelle[1]) + "_f")
+              for f in os.listdir(cartelle[1])), cartelle)
+check("il 3MF resta in output/3mf, fuori dalle cartelle",
+      os.path.dirname(win.worker.params.output_path_3mf) == os.path.join(TMP, "output", "3mf"))
+
 win.mode_selector.setCurrentIndex(3)
 app.processEvents()
 check("fuori dal portachiavi il pannello (e il selettore) non si vedono",
