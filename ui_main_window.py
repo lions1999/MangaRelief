@@ -249,6 +249,44 @@ class MainWindowUI(QMainWindow):
             "B&W: the Standard mode posterisation.")
         cut_form_top = QFormLayout()
         cut_form_top.addRow("Finish:", self.combo_keychain_finish)
+
+        # La terza domanda, dopo la forma (la modalita') e i colori (la
+        # finitura): come si stampano. Non cambia ne' la sagoma ne' il
+        # disegno, solo dove finiscono i colori — in quota o nel piano.
+        self.combo_keychain_print = QComboBox()
+        self.combo_keychain_print.addItems(
+            ["Layer swap (any printer)", "Flat AMS (all colours per layer)"])
+        self.combo_keychain_print.setToolTip(
+            "Layer swap: one filament per height band, changed by hand at\n"
+            "the listed Z values. Works on any printer.\n"
+            "Flat AMS: every colour sits in the same few layers, one part per\n"
+            "colour, and the AMS swaps filament inside each layer.\n"
+            "Needs the Spot Color finish.")
+        cut_form_top.addRow("Print:", self.combo_keychain_print)
+
+        self.flat_options = QWidget()
+        flat_row = QHBoxLayout(self.flat_options)
+        flat_row.setContentsMargins(0, 0, 0, 0)
+        self.chk_flat_face_down = QCheckBox("Face down")
+        self.chk_flat_face_down.setChecked(True)
+        self.chk_flat_face_down.setToolTip(
+            "The coloured face prints on the plate: flat, with the plate's\n"
+            "texture, and the colours all in the first layers. The model comes\n"
+            "out mirrored on purpose — it reads right once flipped.")
+        self.lbl_flat_layers = QLabel("Colour layers:")
+        self.spin_flat_layers = QSpinBox()
+        self.spin_flat_layers.setRange(1, 10)
+        self.spin_flat_layers.setValue(3)
+        self.spin_flat_layers.setToolTip(
+            "How many layers carry the colours; the rest is a one-filament body.\n"
+            "Every colour layer costs a round of filament changes: 3 is opaque\n"
+            "enough for light colours over the body without wasting more.")
+        flat_row.addWidget(self.chk_flat_face_down)
+        flat_row.addStretch()
+        flat_row.addWidget(self.lbl_flat_layers)
+        flat_row.addWidget(self.spin_flat_layers)
+        cut_form_top.addRow(self.flat_options)
+        self.flat_options.setVisible(False)
         cut_layout.addLayout(cut_form_top)
 
         self.combo_cutout_src = QComboBox()
@@ -327,7 +365,8 @@ class MainWindowUI(QMainWindow):
         right_layout.addWidget(self.group_keychain)
 
         self.cutout_widgets = [
-            self.combo_keychain_finish, self.combo_cutout_src,
+            self.combo_keychain_finish, self.combo_keychain_print,
+            self.chk_flat_face_down, self.spin_flat_layers, self.combo_cutout_src,
             self.btn_cutout_paint, self.btn_cutout_edit, self.btn_cutout_reset,
             self.slider_cutout_border, self.chk_cutout_ring,
             self.btn_cutout_ring, self.spin_ring_d, self.btn_cutout_preview,
@@ -335,6 +374,8 @@ class MainWindowUI(QMainWindow):
         self.combo_cutout_src.currentIndexChanged.connect(
             lambda i: self.btn_cutout_paint.setVisible(i == 1))
         self.combo_keychain_finish.currentIndexChanged.connect(
+            lambda _: self._on_mode_changed(self.mode_selector.currentIndex()))
+        self.combo_keychain_print.currentIndexChanged.connect(
             lambda _: self._on_mode_changed(self.mode_selector.currentIndex()))
 
         # SPOT COLOR PANEL (Hidden by default)
@@ -693,3 +734,14 @@ class MainWindowUI(QMainWindow):
             self.spin_dim.setEnabled(True)
             self.spin_base.setEnabled(True)
             self.spin_maxh.setEnabled(True)
+
+        # La stampa piatta esiste solo per la finitura Spot: la B/N produce
+        # quote, non una palette da dividere in parti. Il selettore resta
+        # visibile ma spento, cosi' si capisce che c'e' e perche' non vale.
+        self.combo_keychain_print.setEnabled(keychain_spot)
+        flat = keychain_spot and self.combo_keychain_print.currentIndex() == 1
+        self.flat_options.setVisible(flat)
+        # In piatto la Base non misura niente: lo spessore e' Max Z, e la
+        # parte colorata la decidono i layer della faccia.
+        if flat:
+            self.spin_base.setEnabled(False)

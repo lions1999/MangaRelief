@@ -77,6 +77,15 @@ class GenerationParams:
     # colorare l'arte, e la domanda è la stessa che si fa la cover — quindi
     # stessa forma di risposta (cfr. cover_finish_spot).
     keychain_finish_spot: bool = True
+    # E una volta scelti i colori, come si stampano. False: a strati, un
+    # filamento per quota — qualunque stampante, cambi a mano. True: piatto,
+    # ogni layer della faccia ha tutti i colori e li alterna l'AMS. E' la
+    # terza domanda, dopo la forma (la modalita') e i colori (la finitura), e
+    # come quelle non cambia le altre due: stessa sagoma, stesso disegno.
+    # Vedi engine.mesh_utils.build_flat_parts.
+    keychain_flat: bool = False
+    flat_face_layers: int = 3       # layer colorati; il resto e' corpo
+    flat_face_down: bool = True     # faccia sul piatto (e immagine specchiata)
 
     # Le correzioni all'automatismo viaggiano come SEMI, non come raster: una
     # lista di (x, y) che nominano una regione. Le coordinate sono quelle del
@@ -174,3 +183,11 @@ class GenerationResult:
     # rivedere, e restano invisibili se il motore non le dichiara.
     cutout_n_pieces: int = 0
     cutout_ring_attached: bool = True
+
+    # Stampa piatta. Le parti come le vede lo slicer — (nome, '#rrggbb',
+    # filamento) — e una stima dei cambi bobina: e' il costo che chi scarica
+    # il modello legge su MakerWorld prima di sceglierlo, quindi va saputo
+    # prima di pubblicare, non scoperto affettando.
+    flat_parts: List[Tuple[str, str, int]] = field(default_factory=list)
+    flat_filament_changes: int = 0
+    stl_paths: List[str] = field(default_factory=list)   # uno per filamento

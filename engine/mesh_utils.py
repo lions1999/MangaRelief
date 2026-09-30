@@ -203,32 +203,18 @@ def standard_switch_z(levels: list, layer_height: float) -> list:
     return [round(snapped[i - 1] + lh, 3) for i in range(1, len(snapped))]
 
 
-def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
-                      base_z: float = 1.0, total_z: float = 2.4,
-                      max_dim: float = 100.0, layer_height: float = 0.2,
-                      max_res_cap: int = 800, mask=None, min_feature_mm: float = 0.5):
-    """Genera una mesh a terrazze basata sui colori forniti, quantizzata sui layer di stampa.
-    mask (opzionale): sagoma booleana della stessa shape dell'immagine (es. plate
-    cover con fori camera); implica che l'immagine sia già alla risoluzione finale.
-    min_feature_mm: soglia di pulizia per dettagli/frange (default 0.5mm, il
-    diametro minimo stampabile in rilievo). Nelle incisioni un solco è assenza
-    di materiale, non una parete: la soglia può scendere fino a ~0.2mm."""
-    # Pre-scaling al cap del selettore Mesh Quality (Draft 800 / Standard 1200 / Ultra 1600)
+def classify_palette_indices(image_rgb: np.ndarray, sorted_colors_rgb: list,
+                             max_dim: float, min_feature_mm: float = 0.5) -> np.ndarray:
+    """Assegna ogni pixel al colore piu' vicino della palette e toglie quello
+    che l'ugello non saprebbe stampare. Ritorna la mappa HxW degli indici.
+
+    E' la meta' di process_mesh_topo che non riguarda le quote: il rilievo a
+    terrazze ne fa altezze, la stampa piatta (build_flat_parts) ne fa una parte
+    per colore. Tenerla in un posto solo vuol dire che le due strade vedono gli
+    stessi confini di colore — cambiare la stampa non cambia il disegno.
+    """
     h, w = image_rgb.shape[:2]
-    max_size = int(max_res_cap)
-    if mask is not None:
-        assert mask.shape == (h, w), "mask e immagine devono avere la stessa shape"
-    elif max(h, w) > max_size:
-        scale = max_size / max(h, w)
-        new_w, new_h = int(w * scale), int(h * scale)
-        img_pil = Image.fromarray(image_rgb).resize((new_w, new_h), Image.Resampling.LANCZOS)
-        image_rgb = np.array(img_pil)
-        h, w = image_rgb.shape[:2]
-
     n_colors = len(sorted_colors_rgb)
-
-    # --- LAYER QUANTISATION ---
-    exact_z_heights = compute_topo_z_heights(base_z, total_z, layer_height, n_colors)
 
     # Mappa pixel ai colori tramite cKDTree in spazio Lab percettivo: con la
     # distanza RGB i grigi di anti-aliasing venivano assegnati ai rossi scuri,
@@ -277,6 +263,38 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
         nearest = distance_transform_edt(remove_mask, return_distances=False,
                                          return_indices=True)
         indices = indices[nearest[0], nearest[1]]
+    return indices
+
+
+def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
+                      base_z: float = 1.0, total_z: float = 2.4,
+                      max_dim: float = 100.0, layer_height: float = 0.2,
+                      max_res_cap: int = 800, mask=None, min_feature_mm: float = 0.5):
+    """Genera una mesh a terrazze basata sui colori forniti, quantizzata sui layer di stampa.
+    mask (opzionale): sagoma booleana della stessa shape dell'immagine (es. plate
+    cover con fori camera); implica che l'immagine sia già alla risoluzione finale.
+    min_feature_mm: soglia di pulizia per dettagli/frange (default 0.5mm, il
+    diametro minimo stampabile in rilievo). Nelle incisioni un solco è assenza
+    di materiale, non una parete: la soglia può scendere fino a ~0.2mm."""
+    # Pre-scaling al cap del selettore Mesh Quality (Draft 800 / Standard 1200 / Ultra 1600)
+    h, w = image_rgb.shape[:2]
+    max_size = int(max_res_cap)
+    if mask is not None:
+        assert mask.shape == (h, w), "mask e immagine devono avere la stessa shape"
+    elif max(h, w) > max_size:
+        scale = max_size / max(h, w)
+        new_w, new_h = int(w * scale), int(h * scale)
+        img_pil = Image.fromarray(image_rgb).resize((new_w, new_h), Image.Resampling.LANCZOS)
+        image_rgb = np.array(img_pil)
+        h, w = image_rgb.shape[:2]
+
+    n_colors = len(sorted_colors_rgb)
+
+    # --- LAYER QUANTISATION ---
+    exact_z_heights = compute_topo_z_heights(base_z, total_z, layer_height, n_colors)
+
+    indices = classify_palette_indices(image_rgb, sorted_colors_rgb,
+                                       max_dim=max_dim, min_feature_mm=min_feature_mm)
 
     # Costruisci heightmap discreta usando le altezze quantizzate
     Z = np.zeros((h, w), dtype=np.float32)
@@ -299,6 +317,147 @@ def process_mesh_topo(image_rgb: np.ndarray, sorted_colors_rgb: list,
     # Generazione Mesh tramite la utility interna
     mesh = create_solid_mesh(X, Y, Z, bottom_z=0.0, mask=mask)
     return mesh
+
+
+# ---------------------------------------------------------------------------
+# STAMPA PIATTA (AMS) — il colore sta nel piano, non nella quota
+#
+# Il rilievo a terrazze colora per ALTEZZA: ogni layer ha un filamento solo e i
+# cambi sono pochi, a quote fisse. Qui ogni layer ha tutti i colori e li
+# alterna l'AMS: al posto della heightmap ci sono tanti solidi quanti i
+# colori, affiancati, e il 3MF dice allo slicer quale filamento stampa quale.
+#
+# Il colore sta solo in pochi layer (la "faccia"): tutto il resto e' un corpo
+# di un solo filamento. Ogni layer colorato costa un giro di cambi bobina, e
+# colorare l'intero spessore moltiplicherebbe lo spreco per nove senza che si
+# veda niente di piu'.
+#
+# Il reticolo e' quello dei PIXEL, non dei vertici della heightmap: la mesh a
+# terrazze mette un vertice per pixel e fa le celle fra quattro pixel, quindi
+# una cella a cavallo fra due colori non appartiene a nessuno dei due. Qui le
+# celle sono i pixel stessi, e due parti vicine condividono il confine
+# esattamente — ne' fessure ne' sovrapposizioni da far risolvere allo slicer.
+# ---------------------------------------------------------------------------
+
+def _run_boxes(cell_mask: np.ndarray):
+    """Rettangoli che coprono la maschera senza sovrapporsi: le corse
+    orizzontali di ogni riga, fuse con quelle identiche delle righe sotto.
+    La fusione verticale non cambia il risultato, solo quanti pezzi deve
+    riunire coverage_union: su una sagoma piena passano da migliaia a decine."""
+    h, w = cell_mask.shape
+    pad = np.zeros((h, w + 2), dtype=np.int8)
+    pad[:, 1:-1] = cell_mask
+    d = np.diff(pad, axis=1)
+    rows, starts = np.nonzero(d == 1)
+    _, ends = np.nonzero(d == -1)
+    first = np.searchsorted(rows, np.arange(h + 1))
+    out, active = [], {}
+    for r in range(h + 1):
+        cur = {}
+        if r < h:
+            lo, hi = first[r], first[r + 1]
+            for s, e in zip(starts[lo:hi].tolist(), ends[lo:hi].tolist()):
+                cur[(s, e)] = active.pop((s, e), r)
+        for (s, e), r0 in active.items():
+            out.append((s, r0, e, r))
+        active = cur
+    return np.array(out, dtype=np.float64).reshape(-1, 4)
+
+
+def mask_to_polygons(cell_mask: np.ndarray) -> list:
+    """Poligoni esatti (in unita' di pixel, y verso il basso) della maschera.
+    Ogni lato cade sul bordo di un pixel, quindi due maschere complementari
+    danno poligoni che combaciano al millesimo."""
+    import shapely
+    from shapely.geometry.polygon import orient
+    boxes = _run_boxes(cell_mask)
+    if len(boxes) == 0:
+        return []
+    geom = shapely.coverage_union_all(
+        shapely.box(boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]))
+    # simplify(0) toglie solo i punti allineati lasciati dalle giunture fra
+    # rettangoli: le coordinate sono intere, quindi l'allineamento e' esatto
+    geom = shapely.simplify(geom, 0.0)
+    polys = list(geom.geoms) if hasattr(geom, 'geoms') else [geom]
+    return [orient(p) for p in polys if p.geom_type == 'Polygon' and not p.is_empty]
+
+
+def extrude_polygons(polys: list, z0: float, z1: float) -> trimesh.Trimesh:
+    """Estrude poligoni orientati (esterno antiorario) fra z0 e z1.
+
+    trimesh.creation.extrude_polygon farebbe lo stesso, un poligono alla
+    volta con tutto il suo contorno di controlli: su un tratteggio manga i
+    poligoni sono migliaia e ci metteva sei volte tanto. Qui c'e' solo
+    earcut per i tappi e due triangoli per ogni lato."""
+    import mapbox_earcut as earcut
+    verts, faces, n = [], [], 0
+    for p in polys:
+        rings = [np.asarray(p.exterior.coords)[:-1]]
+        rings += [np.asarray(r.coords)[:-1] for r in p.interiors]
+        pts = np.vstack(rings)
+        k = len(pts)
+        ends = np.cumsum([len(r) for r in rings]).astype(np.uint32)
+        tri = np.asarray(earcut.triangulate_float64(pts, ends), dtype=np.int64).reshape(-1, 3)
+        verts.append(np.column_stack((pts, np.full(k, z0))))
+        verts.append(np.column_stack((pts, np.full(k, z1))))
+        faces.append(tri[:, ::-1] + n)          # tappo sotto, normale in giu'
+        faces.append(tri + n + k)               # tappo sopra, normale in su
+        off = 0
+        for r in rings:
+            m = len(r)
+            i = np.arange(m) + off + n
+            j = np.roll(np.arange(m), -1) + off + n
+            faces.append(np.column_stack((i, j, j + k)))
+            faces.append(np.column_stack((i, j + k, i + k)))
+            off += m
+        n += 2 * k
+    if not verts:
+        return trimesh.Trimesh()
+    return trimesh.Trimesh(np.vstack(verts), np.vstack(faces), process=False)
+
+
+def build_flat_parts(indices: np.ndarray, mask: np.ndarray, max_dim: float,
+                     face_depth: float, total_h: float, face_down: bool = True):
+    """Le parti della stampa piatta: una "faccia" per colore, alta face_depth,
+    e un corpo sotto (o sopra) che porta il pezzo a total_h.
+
+    indices : HxW, indice di palette per pixel (classify_palette_indices)
+    mask    : HxW bool, la sagoma del pezzo
+    Ritorna [(chiave, mesh)], dove chiave e' 'body' o l'indice di palette.
+
+    face_down: la faccia colorata sta a Z=0, sul piatto. E' il verso giusto
+    per un portachiavi: la superficie che si guarda viene dal piatto, piatta
+    e con la sua texture, e i colori sono tutti nei primi layer. Guardata dal
+    piatto pero' l'immagine e' allo specchio — quindi qui la si specchia in X,
+    perche' esca dritta una volta girato il pezzo.
+    """
+    from shapely import affinity
+    h, w = indices.shape
+    pitch = float(max_dim) / max(h, w)
+    if face_down:
+        # x' = (w - x)·p, y' = (h - y)·p: specchio in X e asse Y verso l'alto
+        xform = [-pitch, 0.0, 0.0, -pitch, w * pitch, h * pitch]
+    else:
+        xform = [pitch, 0.0, 0.0, -pitch, 0.0, h * pitch]
+
+    def solido(m, z0, z1):
+        polys = [affinity.affine_transform(p, xform) for p in mask_to_polygons(m)]
+        # uno specchio rovescia il verso dei contorni: si rimettono dritti
+        from shapely.geometry.polygon import orient
+        return extrude_polygons([orient(p) for p in polys], z0, z1)
+
+    if face_down:
+        face_z, body_z = (0.0, face_depth), (face_depth, total_h)
+    else:
+        face_z, body_z = (total_h - face_depth, total_h), (0.0, total_h - face_depth)
+
+    parts = []
+    for i in np.unique(indices[mask]).tolist():
+        m = mask & (indices == i)
+        if m.any():
+            parts.append((int(i), solido(m, *face_z)))
+    parts.append(('body', solido(mask, *body_z)))
+    return parts
 
 
 # ---------------------------------------------------------------------------
@@ -614,6 +773,198 @@ def export_3mf(mesh, output_path_3mf, color_changes_z, slot_colors=None,
         'Metadata/slice_info.config': _SLICE_INFO,
     }
 
+    with zipfile.ZipFile(output_path_3mf, 'w', zipfile.ZIP_DEFLATED) as z:
+        for nome, testo in entries.items():
+            z.writestr(nome, testo.encode('utf-8'))
+
+
+# ---------------------------------------------------------------------------
+# .3MF A PIU' PARTI — la stampa piatta
+#
+# Stesso scheletro di export_3mf (e per le stesse ragioni: vedi sopra), con una
+# differenza sola che conta: l'oggetto ha una parte per colore, e ogni parte
+# porta il proprio filamento. Il formato l'abbiamo letto dal loro importatore
+# (bbs_3mf.cpp, _generate_volumes_new), non da un file salvato:
+#
+#   - ogni parte e' un <object> suo in 3D/Objects/object_1.model, e il guscio
+#     in 3dmodel.model la richiama con un <component objectid="k">;
+#   - in model_settings.config la <part id="k"> si aggancia al component con
+#     lo STESSO id, e ogni <metadata key=... value=...> che non riconosce
+#     finisce nella configurazione della parte: `extruder` e' il filamento;
+#   - un extruder oltre il numero di filamenti del progetto torna a 1 in
+#     silenzio. Il numero di filamenti e' quello di `filament_colour`, quindi
+#     la palette dichiarata deve essere lunga almeno quanto l'extruder piu'
+#     alto — e non di piu', per la stessa regola di export_3mf.
+#
+# Niente custom_gcode_per_layer.xml: non c'e' nessun cambio a una quota.
+# I cambi li decide lo slicer, layer per layer, dalle parti.
+# ---------------------------------------------------------------------------
+
+_MULTI_OBJECT_TPL = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="{core}" xmlns:BambuStudio="{bbs}" xmlns:p="{prod}" requiredextensions="p">
+ <metadata name="BambuStudio:3mfVersion">1</metadata>
+ <resources>
+{objects}
+ </resources>
+ <build/>
+</model>"""
+
+_MULTI_ROOT_TPL = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="{core}" xmlns:BambuStudio="{bbs}" xmlns:p="{prod}" requiredextensions="p">
+ <metadata name="Application">{application}</metadata>
+ <metadata name="BambuStudio:3mfVersion">1</metadata>
+ <metadata name="CreationDate">{today}</metadata>
+ <metadata name="ModificationDate">{today}</metadata>
+ <metadata name="Title">{title}</metadata>
+ <resources>
+  <object id="{root_id}" p:UUID="{uuid_comp}" type="model">
+   <components>
+{components}
+   </components>
+  </object>
+ </resources>
+ <build p:UUID="{uuid_build}">
+  <item objectid="{root_id}" p:UUID="{uuid_item}" transform="1 0 0 0 1 0 0 0 1 {dx} {dy} {dz}" printable="1"/>
+ </build>
+</model>"""
+
+_MULTI_PART_TPL = """\
+    <part id="{pid}" subtype="normal_part">
+      <metadata key="name" value="{name}"/>
+      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>
+      <metadata key="source_file" value="{source}"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="{vid}"/>
+      <metadata key="source_offset_x" value="{off_x}"/>
+      <metadata key="source_offset_y" value="{off_y}"/>
+      <metadata key="source_offset_z" value="{off_z}"/>
+      <metadata key="extruder" value="{extruder}"/>
+      <mesh_stat face_count="{faces}" edges_fixed="0" degenerate_facets="0" facets_removed="0" facets_reversed="0" backwards_edges="0"/>
+    </part>"""
+
+_MULTI_SETTINGS_TPL = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="{root_id}">
+    <metadata key="name" value="{name}"/>
+    <metadata key="extruder" value="1"/>
+    <metadata face_count="{faces}"/>
+{parts}
+  </object>
+  <plate>
+    <metadata key="plater_id" value="1"/>
+    <metadata key="plater_name" value=""/>
+    <metadata key="locked" value="false"/>
+    <model_instance>
+      <metadata key="object_id" value="{root_id}"/>
+      <metadata key="instance_id" value="0"/>
+      <metadata key="identify_id" value="1"/>
+    </model_instance>
+  </plate>
+  <assemble>
+   <assemble_item object_id="{root_id}" instance_id="0" transform="1 0 0 0 1 0 0 0 1 {dx} {dy} {dz}" offset="0 0 0" />
+{assemble_volumes}
+  </assemble>
+</config>"""
+
+
+def _mesh_xml(mesh) -> str:
+    """Il solo blocco <mesh> che trimesh scrive per questa mesh."""
+    buf = io.BytesIO()
+    mesh.export(buf, file_type='3mf')
+    buf.seek(0)
+    with zipfile.ZipFile(buf, 'r') as z:
+        modello = z.read('3D/3dmodel.model').decode('utf-8')
+    return modello[modello.index('<mesh>'):modello.index('</mesh>') + len('</mesh>')]
+
+
+def export_3mf_parts(parts, output_path_3mf, palette_hex, object_name="keychain",
+                     layer_height=0.2, nozzle_mm=0.4):
+    """Scrive un progetto Bambu Studio con un oggetto a piu' parti.
+
+    parts       : [(nome, mesh, extruder)], extruder 1-based
+    palette_hex : i colori dei filamenti, dall'1 in poi. Deve arrivare almeno
+                  all'extruder piu' alto usato dalle parti.
+    """
+    if not parts:
+        raise ValueError("Nothing to export: the model has no parts.")
+    top = max(e for _, _, e in parts)
+    if top > len(palette_hex):
+        raise ValueError(f"Part uses filament {top} but only "
+                         f"{len(palette_hex)} filaments are declared.")
+
+    # La posa come in export_3mf: tutto centrato sull'origine comune, e la
+    # posizione sul piatto nella traslazione dell'item. Il centro e' quello
+    # dell'insieme, non di ogni parte: le parti devono restare dove stanno
+    # l'una rispetto all'altra.
+    basso = np.min([m.bounds[0] for _, m, _ in parts], axis=0)
+    alto = np.max([m.bounds[1] for _, m, _ in parts], axis=0)
+    centro = (basso + alto) / 2.0
+    dx, dy, dz = 128.0, 128.0, round(float(centro[2] - basso[2]), 6)
+
+    def _id():
+        return str(_uuid.uuid4())
+
+    from xml.sax.saxutils import escape
+
+    def _attr(v):
+        # i nomi vengono dal file dell'utente: un & o un " romperebbero l'XML
+        return escape(str(v), {'"': '&quot;'})
+
+    comune = {"core": _CORE_NS, "prod": _PROD_NS, "bbs": _BBS_NS}
+    sorgente = os.path.basename(output_path_3mf)
+    root_id = len(parts) + 1
+    objects, components, part_cfg, assemble = [], [], [], []
+    total_faces = 0
+    for k, (nome, mesh, extruder) in enumerate(parts, start=1):
+        m = mesh.copy()
+        m.apply_translation(-centro)
+        total_faces += len(m.faces)
+        objects.append(f'  <object id="{k}" p:UUID="{_id()}" type="model">\n'
+                       f'   {_mesh_xml(m)}\n  </object>')
+        components.append(f'    <component p:path="/3D/Objects/object_1.model" '
+                          f'objectid="{k}" p:UUID="{_id()}" '
+                          f'transform="1 0 0 0 1 0 0 0 1 0 0 0"/>')
+        part_cfg.append(_MULTI_PART_TPL.format(
+            pid=k, vid=k - 1, name=_attr(nome), source=_attr(sorgente),
+            extruder=int(extruder),
+            faces=len(m.faces),
+            off_x=round(float(centro[0]), 6), off_y=round(float(centro[1]), 6),
+            off_z=round(float(centro[2]), 6)))
+        assemble.append(f'   <assemble_item object_id="{root_id}" volume_id="{k - 1}" '
+                        f'transform="1 0 0 0 1 0 0 0 1 0 0 0" />')
+
+    project_settings = json.dumps({
+        "version": _PROJECT_VERSION,
+        "from": "project",
+        "name": "project_settings",
+        "nozzle_diameter": [f"{float(nozzle_mm):g}"],
+        "filament_colour": list(palette_hex),
+        "layer_height": str(layer_height),
+        "initial_layer_print_height": str(layer_height),
+        "skirt_loops": _SKIRT_LOOPS,
+    }, indent=4)
+
+    entries = {
+        '[Content_Types].xml': _CONTENT_TYPES,
+        '_rels/.rels': _ROOT_RELS,
+        '3D/3dmodel.model': _MULTI_ROOT_TPL.format(
+            application=_APPLICATION, today=date.today().isoformat(),
+            title=escape(os.path.splitext(sorgente)[0]), root_id=root_id,
+            components="\n".join(components), dx=dx, dy=dy, dz=dz,
+            uuid_comp=_id(), uuid_build=_id(), uuid_item=_id(), **comune),
+        '3D/Objects/object_1.model': _MULTI_OBJECT_TPL.format(
+            objects="\n".join(objects), **comune),
+        '3D/_rels/3dmodel.model.rels': _MODEL_RELS,
+        'Metadata/model_settings.config': _MULTI_SETTINGS_TPL.format(
+            root_id=root_id, name=_attr(object_name), faces=total_faces,
+            parts="\n".join(part_cfg), assemble_volumes="\n".join(assemble),
+            dx=dx, dy=dy, dz=dz),
+        'Metadata/project_settings.config': project_settings,
+        'Metadata/slice_info.config': _SLICE_INFO,
+    }
     with zipfile.ZipFile(output_path_3mf, 'w', zipfile.ZIP_DEFLATED) as z:
         for nome, testo in entries.items():
             z.writestr(nome, testo.encode('utf-8'))

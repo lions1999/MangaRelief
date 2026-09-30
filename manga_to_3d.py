@@ -1,4 +1,5 @@
 import sys
+import glob
 import os
 import time
 # pyrefly: ignore [missing-import]
@@ -643,6 +644,13 @@ class Manga3DAppController(MainWindowUI):
 
     def _is_keychain(self) -> bool:
         return self.mode_selector.currentIndex() == 5
+
+    def _keychain_flat(self) -> bool:
+        """Stampa piatta davvero attiva: la stessa condizione con cui
+        _on_mode_changed mostra le sue opzioni, perche' un selettore rimasto
+        su "Flat" dopo il passaggio alla finitura B/N non vale niente."""
+        return (self._is_keychain() and self._keychain_spot()
+                and self.combo_keychain_print.currentIndex() == 1)
 
     def _on_keychain_finish_changed(self, _idx):
         """La finitura cambia l'immagine su cui si segmenta (RGB in Spot,
@@ -1424,7 +1432,17 @@ class Manga3DAppController(MainWindowUI):
             os.makedirs(output_dir_stl, exist_ok=True)
             save_path_stl = os.path.join(output_dir_stl, f"{file_stem}.stl")
             counter = 1
-            while os.path.exists(save_path_stl):
+            # In piatto il motore non scrive <stem>.stl ma uno STL per
+            # filamento (<stem>_f1_<colore>.stl, ...): il controllo
+            # anti-sovrascrittura deve guardare quelli, o il secondo giro
+            # riscriverebbe il primo.
+            flat = self._keychain_flat()
+
+            def _taken(path):
+                if flat:
+                    return bool(glob.glob(glob.escape(os.path.splitext(path)[0]) + "_f1_*.stl"))
+                return os.path.exists(path)
+            while _taken(save_path_stl):
                 save_path_stl = os.path.join(output_dir_stl, f"{file_stem}_{counter}.stl")
                 counter += 1
 
@@ -1512,6 +1530,9 @@ class Manga3DAppController(MainWindowUI):
             cover_gray_levels=self.combo_cover_levels.currentIndex() + 2,
             include_bumper=self.chk_cover_bumper.isChecked(),
             keychain_finish_spot=self._keychain_spot(),
+            keychain_flat=self._keychain_flat(),
+            flat_face_layers=self.spin_flat_layers.value(),
+            flat_face_down=self.chk_flat_face_down.isChecked(),
             cutout_cut_seeds=list(self.cutout_cut_seeds),
             cutout_keep_seeds=list(self.cutout_keep_seeds),
             cutout_paint_mask=(self.cutout_paint_mask
@@ -1682,6 +1703,39 @@ class Manga3DAppController(MainWindowUI):
             )
         return f"  \u2022 L3 Black/Inks  \u2192  Z = {z3} mm  (Filament 2)\n"
 
+    def _flat_instructions(self, res) -> str:
+        """Il riquadro della stampa piatta nel popup: quale bobina va dove, e
+        quanto costa. Al posto dei cambi a quota, che qui non esistono — li
+        fa l'AMS dentro ogni layer, e li decide lo slicer dalle parti."""
+        per_filament = {}
+        for nome, hx, fil in res.flat_parts:
+            per_filament.setdefault(fil, (hx, []))[1].append(nome.split(' ')[0].lower())
+        lines = ""
+        for fil in sorted(per_filament):
+            hx, ruoli = per_filament[fil]
+            lines += f"  • Filament {fil}: {hx}  ({' + '.join(ruoli)})\n"
+        layers = self.spin_flat_layers.value()
+        if self.chk_flat_face_down.isChecked():
+            verso = ("Face down: the coloured face prints on the plate.\n"
+                     "The model looks mirrored in the slicer on purpose —\n"
+                     "it reads right once the piece is flipped. A textured\n"
+                     "PEI plate gives the front its finish.\n")
+        else:
+            verso = "Face up: the colours are in the top layers.\n"
+        return (
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎨  BAMBU STUDIO — Flat AMS\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"The parts already carry their filaments:\n"
+            f"{lines}"
+            f"Map each filament to the AMS slot with that colour.\n"
+            f"No layer pauses to add: the AMS swaps inside each of\n"
+            f"the {layers} colour layers — about {res.flat_filament_changes} "
+            f"filament changes,\nplus the prime tower. Fewer colours or fewer colour\n"
+            f"layers is what makes it cheaper to print.\n\n"
+            f"{verso}\n"
+        )
+
     def on_generate_done(self, stl_path, path_3mf):
         self.unlock_ui()
         self.progress_bar.setValue(100)
@@ -1703,7 +1757,13 @@ class Manga3DAppController(MainWindowUI):
             if path_3mf:
                 msg += f"📄 STL (Full Plate) → {path_3mf}\n"
         else:
-            if stl_path:
+            res_paths = getattr(getattr(getattr(self, 'worker', None), 'result', None),
+                                'stl_paths', None) or []
+            if self._keychain_flat() and res_paths:
+                # uno STL per filamento: vanno elencati tutti, sono un set
+                for pth in res_paths:
+                    msg += f"📄 STL → {pth}\n"
+            elif stl_path:
                 msg += f"📄 STL → {stl_path}\n"
             if path_3mf:
                 msg += f"🎨 3MF → {path_3mf}\n"
@@ -1741,6 +1801,8 @@ class Manga3DAppController(MainWindowUI):
             # scritto nel messaggio di commit e in nessun posto che l'utente
             # legga.
             layer_mm = self.spin_layer_height.value()
+            quote = ("colour layers are" if self._keychain_flat()
+                     else "colour changes below are")
             msg += (
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"⚙️  BEFORE SLICING — pick your profiles\n"
@@ -1754,7 +1816,7 @@ class Manga3DAppController(MainWindowUI):
                 f"instead of 200), so it would print badly.\n\n"
                 f"Select your own Printer, Filament and Process\n"
                 f"from the three dropdowns first. Keep the layer\n"
-                f"height at {layer_mm:.2f} mm: the colour changes below are\n"
+                f"height at {layer_mm:.2f} mm: the {quote}\n"
                 f"computed on it, and a different value puts them\n"
                 f"in the middle of a layer instead of on its edge.\n\n"
                 f"\n"
@@ -1762,13 +1824,18 @@ class Manga3DAppController(MainWindowUI):
                 f"the one MakerWorld checks: it refuses a project whose\n"
                 f"process is still named after the file. Pick a stock\n"
                 f"process, then SAVE the project and upload that file.\n\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🎨  BAMBU STUDIO — Color Changes\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"After slicing, add these layer pauses\n"
-                f"via the colored bar on the right side:\n\n"
-                f"{color_lines}\n"
             )
+            if self._keychain_flat() and res is not None:
+                msg += self._flat_instructions(res)
+            else:
+                msg += (
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🎨  BAMBU STUDIO — Color Changes\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"After slicing, add these layer pauses\n"
+                    f"via the colored bar on the right side:\n\n"
+                    f"{color_lines}\n"
+                )
             
         msg += (
             f"💡 PRO TIP: For high-detail manga panels,\n"

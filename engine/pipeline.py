@@ -20,7 +20,8 @@ from .config import DeckboxConfig
 from .params import GenerationParams, GenerationResult
 from .resources import asset_path
 from .mesh_utils import (standard_switch_z, create_solid_mesh, process_mesh_topo, export_3mf,
-                         compute_topo_z_heights, compute_topo_switch_z)
+                         compute_topo_z_heights, compute_topo_switch_z,
+                         classify_palette_indices, build_flat_parts, export_3mf_parts)
 from .color_utils import (bw_coverage_map, classify_spot_pixels, downsample_for_analysis,
                           quantize_grayscale_levels, thicken_ink)
 from .case_utils import (build_plate_raster, build_case_plate_raster,
@@ -395,6 +396,101 @@ def _process_lid_logo(p: GenerationParams, progress):
     return lid_mesh
 
 
+def _check_flat_params(p: GenerationParams):
+    """Quello che la stampa piatta non sa fare, detto prima di lavorare."""
+    if not p.keychain_finish_spot:
+        # La posterizzazione B/N produce quote, non una palette: per farne
+        # parti servirebbe un'altra strada, e per ora non c'e'.
+        raise ValueError("Flat AMS printing needs the Spot Color finish.")
+    face = p.flat_face_layers * p.layer_height
+    if p.flat_face_layers < 1 or face > p.max_h - 2 * p.layer_height + 1e-6:
+        raise ValueError(
+            f"{p.flat_face_layers} colour layers ({face:.2f} mm) do not fit in a "
+            f"{p.max_h:.2f} mm piece: the body needs at least 2 layers. "
+            f"Lower the colour layers or raise Max Z.")
+
+
+def flat_filament_changes(n_face_colors: int, face_layers: int) -> int:
+    """Stima dei cambi bobina di una stampa piatta.
+
+    In ogni layer della faccia si stampano tutti i colori presenti; lo slicer
+    comincia il layer col filamento con cui ha finito il precedente, quindi
+    ogni layer costa (colori - 1) cambi. Uno in piu' per tornare al corpo.
+    E' una stima: se un colore manca da un layer il conto scende, e lo slicer
+    e' l'unico che lo sa con certezza.
+    """
+    if n_face_colors <= 1:
+        return 0
+    return face_layers * (n_face_colors - 1) + 1
+
+
+def _generate_flat(p: GenerationParams, img_work, palette, cutout_mask, emit, check_cancel):
+    """Portachiavi a stampa piatta: una parte per colore, tutte alla stessa
+    quota, e un corpo di un filamento solo.
+
+    La classificazione e' la stessa del rilievo a strati — la stessa palette
+    Spot, gli stessi confini ripuliti da classify_palette_indices — quindi
+    passare da una stampa all'altra cambia solo dove finiscono i colori, non
+    quali sono ne' dove stanno nel disegno.
+    """
+    emit(20, "🎨 Flat AMS: splitting colours into parts...")
+    img_rgb = downsample_for_analysis(_as_rgb(img_work), p.max_res_cap)
+    mask = resize_mask(cutout_mask, img_rgb.shape[:2])
+    indices = classify_palette_indices(img_rgb, palette, max_dim=p.max_dim,
+                                       min_feature_mm=0.5)
+    check_cancel()
+
+    face_depth = round(p.flat_face_layers * p.layer_height, 3)
+    emit(40, "🧱 Building colour faces and body...")
+    raw = build_flat_parts(indices, mask, p.max_dim, face_depth=face_depth,
+                           total_h=p.max_h, face_down=p.flat_face_down)
+    check_cancel()
+
+    # I filamenti: il corpo prende il colore di base della palette (il bianco
+    # Spot) ed e' sempre il filamento 1; gli altri seguono nell'ordine della
+    # palette, e solo quelli che hanno davvero pixel. Un colore che la pulizia
+    # ha cancellato non deve comparire come bobina da caricare.
+    hexes = ['#%02x%02x%02x' % tuple(int(v) for v in c) for c in palette]
+    used = sorted({k for k, _ in raw if k != 'body'} | {0})
+    filament_of = {k: n for n, k in enumerate(used, start=1)}
+    palette_hex = [hexes[k] for k in used]
+
+    parts = []
+    for k, mesh in raw:
+        if k == 'body':
+            parts.append((f"Body {hexes[0]}", mesh, 1))
+        else:
+            parts.append((f"Face {hexes[k]}", mesh, filament_of[k]))
+
+    result = GenerationResult()
+    result.slot_colors = palette_hex[1:]
+    result.flat_parts = [(nome, palette_hex[e - 1], e) for nome, _, e in parts]
+    n_face_colors = len([k for k, _ in raw if k != 'body'])
+    result.flat_filament_changes = flat_filament_changes(n_face_colors, p.flat_face_layers)
+
+    emit(80, "💾 Exporting multi-part 3MF...")
+    if p.output_path_3mf:
+        export_3mf_parts(parts, p.output_path_3mf, palette_hex,
+                         object_name=p.source_image_name,
+                         layer_height=p.layer_height, nozzle_mm=p.nozzle_mm)
+        result.mf3_path = p.output_path_3mf
+    if p.output_path:
+        # Uno STL non ha parti: se ne scrive uno per filamento, da caricare
+        # insieme nello slicer ("un oggetto con piu' parti") e assegnare.
+        stem = os.path.splitext(p.output_path)[0]
+        out_dir = os.path.dirname(p.output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        for n, hx in enumerate(palette_hex, start=1):
+            meshes = [m for _, m, e in parts if e == n]
+            path = f"{stem}_f{n}_{hx.lstrip('#')}.stl"
+            trimesh.util.concatenate(meshes).export(path)
+            result.stl_paths.append(path)
+        result.stl_path = result.stl_paths[0] if result.stl_paths else None
+    emit(100, "Export completed!")
+    return result
+
+
 def generate(image, params: GenerationParams, progress=None, should_cancel=None) -> GenerationResult:
     """Genera i modelli 3D dall'immagine secondo i parametri dati.
 
@@ -451,6 +547,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
     # posterizzazione Standard.
     cutout_mask = cutout_ring = None
     cutout_pieces, cutout_ring_ok = 0, True
+    if p.is_keychain_mode and p.keychain_flat:
+        _check_flat_params(p)
     if p.is_keychain_mode:
         emit(4, "✂️ Building cutout silhouette...")
         cut = compute_cutout(
@@ -554,6 +652,15 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
         # Da qui in poi la pipeline coincide con la Topographic
         is_topo = True
         topo_colors = palette
+
+    if p.is_keychain_mode and p.keychain_flat:
+        # La stampa piatta ha la sua uscita: niente terrazze da decimare ne'
+        # quote da risnappare, e un 3MF fatto di parti invece che di cambi.
+        result = _generate_flat(p, img_work, topo_colors, cutout_mask, emit, check_cancel)
+        result.cutout_n_pieces = cutout_pieces
+        result.cutout_ring_attached = cutout_ring_ok
+        result.elapsed_s = time.time() - t_start_total
+        return result
 
     if is_topo and topo_colors:
         emit(10, "🏔 Starting Topographic Color Processing...")
