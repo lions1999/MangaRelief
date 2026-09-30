@@ -73,14 +73,17 @@ def fixture():
 
 
 IMG = fixture()
-LH, MAXH, LAYERS = 0.2, 2.8, 3
+LH, BASE, LAYERS = 0.2, 1.6, 3
 FACE = LAYERS * LH
+# In piatto la Base e' il corpo e lo spessore ne discende. max_h si passa
+# volutamente sbagliato: se il motore lo leggesse, le quote lo direbbero.
+MAXH = round(BASE + FACE, 3)
 
 
 def params(**kw):
     base = dict(mode=GenerationMode.KEYCHAIN, keychain_finish_spot=True,
                 keychain_flat=True, spot_accents=[ROSSO, BLU],
-                max_dim=60, base_h=1.6, max_h=MAXH, layer_height=LH,
+                max_dim=60, base_h=BASE, max_h=5.0, layer_height=LH,
                 flat_face_layers=LAYERS, max_res_cap=900)
     base.update(kw)
     return GenerationParams(**base)
@@ -222,13 +225,14 @@ try:
 except ValueError as e:
     check("B/N + piatto viene rifiutato", "Spot" in str(e), e)
 try:
-    generate(IMG, params(flat_face_layers=13))
-    check("13 layer colorati in 2,8 mm vengono rifiutati", False)
+    generate(IMG, params(base_h=0.2))
+    check("un corpo da un layer viene rifiutato", False)
 except ValueError as e:
-    check("13 layer colorati in 2,8 mm vengono rifiutati", "layers" in str(e), e)
+    check("un corpo da un layer viene rifiutato", "Base" in str(e), e)
 
 # Il rilievo a strati non deve accorgersi che la stampa piatta esiste.
-r4 = generate(IMG, params(keychain_flat=False, output_path_3mf=os.path.join(TMP, "strati.3mf")))
+r4 = generate(IMG, params(keychain_flat=False, max_h=2.8,
+                          output_path_3mf=os.path.join(TMP, "strati.3mf")))
 z4 = zipfile.ZipFile(r4.mf3_path)
 check("a strati: il 3MF ha ancora i cambi a quota e una parte sola",
       "Metadata/custom_gcode_per_layer.xml" in z4.namelist()
@@ -252,16 +256,28 @@ check("portachiavi Spot: il selettore di stampa c'e' ed e' acceso",
       win.combo_keychain_print.isVisible() and win.combo_keychain_print.isEnabled())
 check("a strati: le opzioni piatte sono nascoste",
       not win.flat_options.isVisible() and not win._keychain_flat())
+maxh_strati = win.spin_maxh.value()
 win.combo_keychain_print.setCurrentIndex(1)
 app.processEvents()
-check("piatto: compaiono faccia in giu' e layer colorati, la Base si spegne",
+check("piatto: compaiono le opzioni, la Base resta, Max Z si spegne",
       win.flat_options.isVisible() and win._keychain_flat()
-      and not win.spin_base.isEnabled())
+      and win.spin_base.isEnabled() and not win.spin_maxh.isEnabled())
+# 1,8 + 4 x 0,2 = 2,6: diverso dal 2,8 del rilievo a strati, altrimenti la
+# prova sul ripristino qui sotto passerebbe senza provare niente
+win.spin_base.setValue(1.8)
+win.spin_flat_layers.setValue(4)
+app.processEvents()
+check("piatto: Max Z = Base + layer colorati, e li segue",
+      abs(win.spin_maxh.value() - 2.6) < 1e-6 and abs(maxh_strati - 2.6) > 0.1,
+      (win.spin_maxh.value(), maxh_strati))
 win.combo_keychain_finish.setCurrentIndex(1)
 app.processEvents()
 check("B/N: il selettore si spegne e il piatto non vale piu'",
       not win.combo_keychain_print.isEnabled() and not win._keychain_flat()
-      and not win.flat_options.isVisible() and win.spin_base.isEnabled())
+      and not win.flat_options.isVisible() and win.spin_maxh.isEnabled())
+check("uscendo dal piatto Max Z torna quello del rilievo a strati",
+      abs(win.spin_maxh.value() - maxh_strati) < 1e-6,
+      (win.spin_maxh.value(), maxh_strati))
 win.combo_keychain_finish.setCurrentIndex(0)
 win.toggle_ui_state(disabled=True)
 check("durante la generazione i controlli piatti sono bloccati",
@@ -269,11 +285,55 @@ check("durante la generazione i controlli piatti sono bloccati",
 win.toggle_ui_state(disabled=False)
 check("dopo la generazione tornano come prima",
       win.combo_keychain_print.isEnabled() and win.spin_flat_layers.isEnabled()
-      and not win.spin_base.isEnabled())
+      and win.spin_base.isEnabled() and not win.spin_maxh.isEnabled())
+
+# Place deve accendere l'anteprima, come Edit regions: il punto si legge sul
+# raster di segmentazione. Prima restava spenta, il click cadeva
+# sull'originale a un'altra risoluzione, e "non succedeva nulla".
+from PyQt6.QtWidgets import QFileDialog  # noqa: E402
+img_path = os.path.join(TMP, "medaglione.png")
+cv2.imwrite(img_path, cv2.cvtColor(IMG, cv2.COLOR_RGB2BGR))
+QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: (img_path, ""))
+win.load_image()
+app.processEvents()
+win.mode_selector.setCurrentIndex(5)
+win.combo_keychain_finish.setCurrentIndex(0)
+win.combo_keychain_print.setCurrentIndex(1)
+app.processEvents()
+win.btn_cutout_preview.setChecked(False)
+win.btn_cutout_ring.click()
+app.processEvents()
+check("Place accende l'anteprima del ritaglio",
+      win.btn_cutout_ring.isChecked() and win.btn_cutout_preview.isChecked())
+win.on_pixel_clicked(450, 40)
+app.processEvents()
+check("il click piazza l'occhiello e accende la spunta",
+      win.cutout_ring_xy == (450, 40) and win.chk_cutout_ring.isChecked()
+      and not win.btn_cutout_ring.isChecked())
+
+# Il nome dice come si stampa: senza, i due file dello stesso disegno sono
+# indistinguibili in output/.
+from PyQt6.QtWidgets import QMessageBox  # noqa: E402
+popup = []
+QMessageBox.information = staticmethod(lambda *a, **k: popup.append(a[2]))
+QMessageBox.critical = staticmethod(lambda *a, **k: popup.append(a[2]))
+win.chk_export_stl.setChecked(False)
+win.chk_export_3mf.setChecked(True)
+win.generate_stl()
+win.worker.wait()
+app.processEvents()
+nome_3mf = win.worker.params.output_path_3mf
+check("il 3MF piatto si chiama <nome>_keychain_ams",
+      os.path.basename(nome_3mf).startswith("medaglione_keychain_ams"), nome_3mf)
+check("il popup parla di AMS, non di cambi a quota",
+      popup and "Flat AMS" in popup[-1] and "Color Changes" not in popup[-1],
+      popup[-1][:80] if popup else None)
+
 win.mode_selector.setCurrentIndex(3)
 app.processEvents()
 check("fuori dal portachiavi il pannello (e il selettore) non si vedono",
-      not win.combo_keychain_print.isVisible() and win.spin_base.isEnabled())
+      not win.combo_keychain_print.isVisible() and win.spin_base.isEnabled()
+      and win.spin_maxh.isEnabled())
 
 print(f"\n{'OK' if not fails else 'FALLITE: ' + str(len(fails))}")
 sys.exit(1 if fails else 0)

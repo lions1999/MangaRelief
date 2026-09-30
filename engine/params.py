@@ -84,7 +84,9 @@ class GenerationParams:
     # come quelle non cambia le altre due: stessa sagoma, stesso disegno.
     # Vedi engine.mesh_utils.build_flat_parts.
     keychain_flat: bool = False
-    flat_face_layers: int = 3       # layer colorati; il resto e' corpo
+    # layer colorati, SOPRA il corpo: in piatto base_h e' il corpo bianco e
+    # lo spessore e' base_h + questi layer (max_h non si legge)
+    flat_face_layers: int = 3
     flat_face_down: bool = True     # faccia sul piatto (e immagine specchiata)
 
     # Le correzioni all'automatismo viaggiano come SEMI, non come raster: una

@@ -402,12 +402,21 @@ def _check_flat_params(p: GenerationParams):
         # La posterizzazione B/N produce quote, non una palette: per farne
         # parti servirebbe un'altra strada, e per ora non c'e'.
         raise ValueError("Flat AMS printing needs the Spot Color finish.")
-    face = p.flat_face_layers * p.layer_height
-    if p.flat_face_layers < 1 or face > p.max_h - 2 * p.layer_height + 1e-6:
+    if p.flat_face_layers < 1:
+        raise ValueError("Flat AMS printing needs at least 1 colour layer.")
+    # La Base e' il corpo bianco: sotto due layer non regge lo strappo
+    # dell'anellino, e la faccia colorata sopra sarebbe tutto il pezzo.
+    if p.base_h < 2 * p.layer_height - 1e-6:
         raise ValueError(
-            f"{p.flat_face_layers} colour layers ({face:.2f} mm) do not fit in a "
-            f"{p.max_h:.2f} mm piece: the body needs at least 2 layers. "
-            f"Lower the colour layers or raise Max Z.")
+            f"A {p.base_h:.2f} mm body is too thin: the Base needs at least "
+            f"2 layers ({2 * p.layer_height:.2f} mm).")
+
+
+def flat_total_h(p: GenerationParams) -> float:
+    """Lo spessore del pezzo piatto: il corpo (Base) piu' i layer colorati.
+    Max Z non si legge: in questa stampa e' una conseguenza, e la UI la
+    mostra spenta con questo stesso valore."""
+    return round(p.base_h + p.flat_face_layers * p.layer_height, 3)
 
 
 def flat_filament_changes(n_face_colors: int, face_layers: int) -> int:
@@ -443,7 +452,7 @@ def _generate_flat(p: GenerationParams, img_work, palette, cutout_mask, emit, ch
     face_depth = round(p.flat_face_layers * p.layer_height, 3)
     emit(40, "🧱 Building colour faces and body...")
     raw = build_flat_parts(indices, mask, p.max_dim, face_depth=face_depth,
-                           total_h=p.max_h, face_down=p.flat_face_down)
+                           total_h=flat_total_h(p), face_down=p.flat_face_down)
     check_cancel()
 
     # I filamenti: il corpo prende il colore di base della palette (il bianco

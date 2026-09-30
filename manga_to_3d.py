@@ -138,6 +138,7 @@ class Manga3DAppController(MainWindowUI):
         self.btn_cutout_preview.toggled.connect(self._on_cutout_preview_toggled)
         self.slider_cutout_border.valueChanged.connect(self._on_cutout_border_changed)
         self.chk_cutout_ring.toggled.connect(lambda _: self._refresh_cutout_preview())
+        self.btn_cutout_ring.toggled.connect(self._on_cutout_ring_toggled)
         self.spin_ring_d.valueChanged.connect(lambda _: self._refresh_cutout_preview())
         # White Clip decide cosa e' tratto, quindi ridisegna i confini delle
         # regioni: la segmentazione in cache non vale piu'.
@@ -781,6 +782,26 @@ class Manga3DAppController(MainWindowUI):
         else:
             self.btn_cutout_edit.setText("✂️ Edit regions")
 
+    def _on_cutout_ring_toggled(self, checked):
+        """Place accende l'anteprima, esattamente come Edit regions.
+
+        Stessa ragione: il punto dell'occhiello e' in coordinate del raster
+        di segmentazione, e l'unica immagine mostrata a quella risoluzione e'
+        l'anteprima del ritaglio. Senza, il click cadeva sull'originale a
+        piena risoluzione — l'occhiello finiva altrove, spesso fuori dal pezzo,
+        e con l'anteprima spenta non si vedeva niente: "clicco e non succede
+        nulla".
+        """
+        if not checked:
+            return
+        self.btn_cutout_edit.setChecked(False)
+        self.btn_cutout_preview.setChecked(True)
+        if not self.btn_cutout_preview.isChecked():
+            # nessuna immagine su cui piazzarlo
+            self.btn_cutout_ring.setChecked(False)
+            return
+        self.lbl_status.setText("📍 Click on the piece where the keyring hole goes.")
+
     def _on_cutout_preview_toggled(self, checked):
         if checked and self._cutout_source() is None:
             self.btn_cutout_preview.setChecked(False)
@@ -1421,6 +1442,11 @@ class Manga3DAppController(MainWindowUI):
         # va in coda.
         if is_cover:
             file_stem = f"cover_plate_{base_name}"
+        elif self._keychain_flat():
+            # Stesso disegno, un altro modo di stamparlo: senza il suffisso i
+            # due file sarebbero indistinguibili in output/, e quello piatto
+            # su una stampante senza AMS non si stampa.
+            file_stem = f"{base_name}_keychain_ams"
         elif self._is_keychain():
             file_stem = f"{base_name}_keychain"
         else:

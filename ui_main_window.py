@@ -278,7 +278,8 @@ class MainWindowUI(QMainWindow):
         self.spin_flat_layers.setRange(1, 10)
         self.spin_flat_layers.setValue(3)
         self.spin_flat_layers.setToolTip(
-            "How many layers carry the colours; the rest is a one-filament body.\n"
+            "How many layers carry the colours, on top of the white body\n"
+            "(Base). Max Z becomes Base + colour layers.\n"
             "Every colour layer costs a round of filament changes: 3 is opaque\n"
             "enough for light colours over the body without wasting more.")
         flat_row.addWidget(self.chk_flat_face_down)
@@ -287,6 +288,7 @@ class MainWindowUI(QMainWindow):
         flat_row.addWidget(self.spin_flat_layers)
         cut_form_top.addRow(self.flat_options)
         self.flat_options.setVisible(False)
+        self._flat_saved_maxh = None   # il Max Z del rilievo a strati, da restituire
         cut_layout.addLayout(cut_form_top)
 
         self.combo_cutout_src = QComboBox()
@@ -666,6 +668,10 @@ class MainWindowUI(QMainWindow):
         self.combo_cover_finish.currentIndexChanged.connect(
             lambda _: self._on_mode_changed(self.mode_selector.currentIndex()))
 
+        # Stampa piatta: Max Z segue corpo + faccia (vedi _on_mode_changed)
+        for sp in (self.spin_base, self.spin_flat_layers, self.spin_layer_height):
+            sp.valueChanged.connect(self._sync_flat_maxh)
+
         # Registro dei widget da bloccare durante la generazione: ogni nuovo
         # controllo va aggiunto QUI, non dentro toggle_ui_state
         self.lockable_widgets = [
@@ -741,7 +747,28 @@ class MainWindowUI(QMainWindow):
         self.combo_keychain_print.setEnabled(keychain_spot)
         flat = keychain_spot and self.combo_keychain_print.currentIndex() == 1
         self.flat_options.setVisible(flat)
-        # In piatto la Base non misura niente: lo spessore e' Max Z, e la
-        # parte colorata la decidono i layer della faccia.
+        # In piatto la Base e' lo spessore del corpo bianco e Max Z ne
+        # discende: base + layer colorati. Max Z si mostra, spento, e il
+        # valore che aveva torna quando si esce dal piatto — altrimenti il
+        # rilievo a strati ripartirebbe con un'altezza calcolata per un'altra
+        # stampa, e bande da un layer solo.
         if flat:
-            self.spin_base.setEnabled(False)
+            if self._flat_saved_maxh is None:
+                self._flat_saved_maxh = self.spin_maxh.value()
+            self.spin_maxh.setEnabled(False)
+            self._sync_flat_maxh()
+        elif self._flat_saved_maxh is not None:
+            self.spin_maxh.setValue(self._flat_saved_maxh)
+            self._flat_saved_maxh = None
+
+    def _flat_active(self) -> bool:
+        return (self.mode_selector.currentIndex() == 5
+                and self.combo_keychain_finish.currentIndex() == 0
+                and self.combo_keychain_print.currentIndex() == 1)
+
+    def _sync_flat_maxh(self, *_):
+        """Max Z = corpo + faccia, quando la stampa e' piatta."""
+        if not self._flat_active():
+            return
+        face = self.spin_flat_layers.value() * self.spin_layer_height.value()
+        self.spin_maxh.setValue(round(self.spin_base.value() + face, 3))
