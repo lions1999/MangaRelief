@@ -200,10 +200,19 @@ check("...e chiede di non cambiare l'altezza layer, su cui stanno i cambi",
 check("...e non dice piu' che i profili si chiamano come il file",
       "factory values" not in _msg and "named after the file" not in _msg)
 
+# I cambi colore li porta il file: il popup non deve piu' chiedere di
+# aggiungerli, e Arachne e' gia' nel profilo.
+check("...e dice che i cambi colore sono gia' nel 3MF, non da aggiungere",
+      "already in the 3MF" in _msg and "add these layer pauses" not in _msg.lower())
+check("...e non consiglia Arachne, che il profilo attiva gia'", "Arachne" not in _msg)
+
 _visto.clear()
 _win.on_generate_done(os.path.join(d, "x.stl"), "")
-check("senza 3MF l'avvertenza non compare (non c'e' nessun progetto da aprire)",
-      "BEFORE SLICING" not in _visto.get("msg", ""))
+_solo_stl = _visto.get("msg", "")
+check("senza 3MF il riquadro del profilo non compare (non c'e' nessun progetto)",
+      "profile inside the project" not in _solo_stl)
+check("solo STL: cambi colore e Arachne da impostare a mano",
+      "set these by hand" in _solo_stl and "Arachne" in _solo_stl)
 print()
 
 print("TUTTO OK" if not fails else "FALLITI: " + ", ".join(fails))

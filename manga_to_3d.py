@@ -1848,17 +1848,39 @@ class Manga3DAppController(MainWindowUI):
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"🎨  BAMBU STUDIO — Color Changes\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"After slicing, add these layer pauses\n"
-                    f"via the colored bar on the right side:\n\n"
+                    f"The colour changes are already in the 3MF:\n"
+                    f"after slicing they show as markers on the\n"
+                    f"layer bar on the right. Nothing to add.\n"
+                    f"For reference (and for the STL):\n\n"
                     f"{color_lines}\n"
                 )
-            
-        msg += (
-            f"💡 PRO TIP: For high-detail manga panels,\n"
-            f"set Wall Generator to Arachne in Bambu Studio.\n"
-            f"This prevents fine lines and small details\n"
-            f"from disappearing during slicing!"
-        )
+        elif stl_path and self._keychain_flat():
+            # In piatto non ci sono cambi a quota: gli STL sono uno per
+            # filamento e vanno caricati insieme come parti di un oggetto.
+            msg += (
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎨  STL only — one file per filament\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Drag all the STLs into the slicer at once and\n"
+                f"load them as ONE object with multiple parts,\n"
+                f"then give each part the filament in its name\n"
+                f"(_f1_, _f2_, ...).\n\n"
+                f"💡 Set Wall Generator to Arachne: fine lines\n"
+                f"and small details survive slicing."
+            )
+        elif stl_path:
+            # Solo STL: nessun profilo, quindi i cambi colore e Arachne vanno
+            # impostati a mano. Col 3MF li porta gia' il file.
+            msg += (
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎨  STL only — set these by hand\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Add the colour changes from the layer bar\n"
+                f"on the right side of the slicer preview:\n\n"
+                f"{color_lines}\n"
+                f"💡 Set Wall Generator to Arachne: fine lines\n"
+                f"and small details survive slicing."
+            )
 
         QMessageBox.information(self, "Export Successful", msg)
 
