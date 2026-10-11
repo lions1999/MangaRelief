@@ -1817,39 +1817,29 @@ class Manga3DAppController(MainWindowUI):
 
         
         if path_3mf:
-            # Perche' Stampante, Filamenti e Processo si chiamano tutti come il
-            # file. Non e' un difetto del 3MF: Bambu Studio non FONDE la nostra
-            # configurazione col profilo di chi apre, ne costruisce uno nuovo
-            # intitolato al progetto, e ogni chiave che non nominiamo prende il
-            # valore di fabbrica. Dichiararne di piu' non aiuta — sarebbe
-            # un'altra impostazione imposta al posto della sua — quindi l'unico
-            # rimedio e' dirlo. Deciso in 9902d37 e mai arrivato fin qui: era
-            # scritto nel messaggio di commit e in nessun posto che l'utente
-            # legga.
+            # Il 3MF porta dentro un profilo completo di serie (A1 + PLA Basic,
+            # engine/bambu_profile.py): Bambu lo apre coi nomi dei preset veri,
+            # non piu' con stampante/filamenti/processo intitolati al file. Resta
+            # da dire QUALE profilo e', perche' chi ha un'altra stampante deve
+            # cambiarla, e che l'altezza layer non va toccata.
             layer_mm = self.spin_layer_height.value()
             quote = ("colour layers are" if self._keychain_flat()
                      else "colour changes below are")
+            if abs(self.spin_nozzle.value() - 0.2) < 1e-6:
+                profilo = "Bambu Lab A1 0.2 nozzle, 0.10mm Standard"
+            else:
+                profilo = "Bambu Lab A1 0.4 nozzle, 0.20mm Standard"
             msg += (
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"⚙️  BEFORE SLICING — pick your profiles\n"
+                f"⚙️  BAMBU STUDIO — profile inside the project\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"Printer, Filament and Process will all show\n"
-                f"as \"({os.path.basename(path_3mf)})\". That is Bambu Studio\n"
-                f"naming settings embedded in the project — not\n"
-                f"your presets. Everything this file does not\n"
-                f"declare falls back to factory values (nozzle\n"
-                f"200 °C instead of 220, outer wall 60 mm/s\n"
-                f"instead of 200), so it would print badly.\n\n"
-                f"Select your own Printer, Filament and Process\n"
-                f"from the three dropdowns first. Keep the layer\n"
-                f"height at {layer_mm:.2f} mm: the {quote}\n"
-                f"computed on it, and a different value puts them\n"
-                f"in the middle of a layer instead of on its edge.\n\n"
-                f"\n"
-                f"The Process dropdown is the one people skip, and it is\n"
-                f"the one MakerWorld checks: it refuses a project whose\n"
-                f"process is still named after the file. Pick a stock\n"
-                f"process, then SAVE the project and upload that file.\n\n"
+                f"The 3MF opens with stock presets:\n"
+                f"{profilo},\n"
+                f"Bambu PLA Basic in every slot.\n"
+                f"On another printer, pick yours from the\n"
+                f"Printer dropdown. Keep the layer height at {layer_mm:.2f} mm:\n"
+                f"the {quote} computed on it, and a different\n"
+                f"value puts them in the middle of a layer.\n\n"
             )
             if self._keychain_flat() and res is not None:
                 msg += self._flat_instructions(res)

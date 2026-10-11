@@ -1,6 +1,5 @@
 import os
 import io
-import json
 import uuid as _uuid
 import zipfile
 from datetime import date
@@ -13,6 +12,7 @@ from scipy.ndimage import (median_filter, label, binary_erosion,
 
 from .config import SLOT_COLORS_3MF
 from .color_utils import rgb_to_lab, CHROMA_MATCH_WEIGHT
+from .bambu_profile import build_project_settings
 
 def create_solid_mesh(X, Y, Z, bottom_z=0.0, mask=None):
     """
@@ -470,14 +470,13 @@ def build_flat_parts(indices: np.ndarray, mask: np.ndarray, max_dim: float,
 # colore, che quindi non veniva nemmeno aperto. E' il motivo per cui ogni file
 # prodotto qui e' sempre arrivato allo slicer come "solo geometria".
 #
-# Quello che serve non sono le impostazioni di stampa (project_settings.config
-# puo' restare vuoto), e' lo scheletro:
+# Lo scheletro:
 #
 #   3D/3dmodel.model            guscio: metadati, un <object> con <components>
 #   3D/Objects/object_1.model   la geometria vera, referenziata da p:path
 #   3D/_rels/3dmodel.model.rels il collegamento fra i due
-#   Metadata/model_settings.config    oggetto, plate, istanza
-#   Metadata/project_settings.config  vuoto: non fingiamo di sapere la stampante
+#   Metadata/model_settings.config    oggetto, parti, plate, istanza
+#   Metadata/project_settings.config  il profilo COMPLETO (engine/bambu_profile.py)
 #
 # Ricostruito confrontando entry per entry un file generato da qui e poi
 # salvato da Bambu Studio 02.08.02.61 — non da documentazione, che per questa
@@ -488,62 +487,24 @@ _CORE_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
 _PROD_NS = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
 _BBS_NS = "http://schemas.bambulab.com/package/2021"
 
-# Il generatore dichiarato, e qui non c'e' liberta' di scelta: l'importatore
-# ricava da questa stringa la versione del programma che ha scritto il file, e
-# se non ci riesce non legge la configurazione — cioe' butta via i cambi
-# colore. Misurato: lo stesso identico file con "MangaRelief-1.0.0" viene
-# rifiutato, con "BambuStudio-<versione>" viene accettato.
+# Il generatore dichiarato e il profilo vanno insieme.
 #
-# Non e' una firma sul modello, e' una dichiarazione di compatibilita' di
-# formato, come lo user agent di un browser: il nostro nome resta ovunque
-# altro nel file.
+# `Application` deve cominciare con "BambuStudio-": lo stesso file con
+# "MangaRelief-1.0.0" viene rifiutato. Non e' una firma sul modello, e' una
+# dichiarazione di formato, come lo user agent di un browser.
 #
-# La versione non va aggiornata a ogni uscita di Bambu Studio, e inseguirla
-# sarebbe anzi la scelta sbagliata. Il confronto fra la versione del file e
-# quella del programma nel loro codice e' commentato:
+# Fino a ottobre 2026 si dichiarava "02.00.00.00" con un project_settings di
+# cinque chiavi (le minime per aprirsi, trovate per bisezione). Funzionava solo
+# a meta': Bambu costruiva stampante, filamenti e processo intitolati al file,
+# ogni chiave mancante prendeva il valore di fabbrica (ugello a 200 gradi, muro
+# esterno a 60 mm/s), MakerWorld rifiutava il processo col nome del file, e la
+# riga di comando `bambu-studio --slice` andava in crash (0xC0000005) — mentre
+# un progetto risalvato da Bambu si affettava senza problemi.
 #
-#     /* if (file_version.maj() > app_version.maj())
-#            dont_load_config = true;*/
-#
-# quindi oggi il numero non viene paragonato a niente — conta solo che esista e
-# si lasci interpretare. E se un domani riattivassero quella riga, il confronto
-# e' sul numero maggiore: un file che dichiara l'ultima versione verrebbe
-# rifiutato da chi non ha ancora aggiornato, mentre uno basso passa sempre.
-# L'unica direzione sicura e' verso il basso, e una volta sola.
-_APPLICATION = "BambuStudio-02.00.00.00"
-
-# Le cinque chiavi di project_settings.config che servono, non una di piu'.
-# Trovate per bisezione contro Bambu Studio 02.08.02.61: con le sole tre di
-# identita' il file non si apre, e fra le impostazioni quella indispensabile e'
-# `nozzle_diameter` — lo stesso file con `printer_technology` al suo posto
-# viene rifiutato. Un file vuoto o `{}` non basta: rompe perfino un progetto
-# scritto da Bambu Studio stesso.
-#
-# Che si debba dichiarare un ugello e' spiacevole — 0.4 e' il valore di
-# fabbrica di tutte le Bambu, ma non di tutti gli utenti — ed e' anche il
-# motivo dell'avviso sui "preset personalizzati" che compare all'apertura:
-# Bambu trova un'impostazione di stampante senza un profilo a cui appartenga.
-# Non e' un avviso falso, e non si toglie senza rinunciare ai cambi colore.
-# Stessa ragione: un numero fermo, dentro il 2.x.
-_PROJECT_VERSION = "02.00.00.00"
-_DEFAULT_NOZZLE = "0.4"
-
-# Quello che dichiariamo qui non si aggiunge al profilo di chi apre il file:
-# lo sostituisce. Bambu costruisce un processo nuovo, intitolato al nostro
-# file, e ogni chiave che non nominiamo prende il valore di fabbrica — non
-# quello del profilo scelto. Misurato confrontando due file affettati dalla
-# stessa persona: 268 impostazioni su 557 diverse, fra cui l'ugello a 200 °C
-# invece di 220 e il muro esterno a 60 mm/s invece di 200.
-#
-# Non c'e' modo di dire "tieni il tuo processo": un progetto ne definisce uno
-# per forza. Quindi si dichiara il minimo che riguarda *questo* oggetto e si
-# dice a chi scarica di scegliere il proprio profilo — un menu a tendina, che
-# rimette a posto tutte e 268 in un colpo.
-#
-# skirt_loops a zero perche' e' l'unico valore di fabbrica che si vede a occhio
-# nudo: un giro di perimetro sul primo layer, in filamento 1, che su una lastra
-# larga non serve a niente e sembra un bordo del disegno.
-_SKIRT_LOOPS = "0"
+# Ora il profilo e' quello di un progetto vero, e la versione dichiarata e'
+# quella del progetto da cui viene (build_project_settings la restituisce),
+# ripetuta in 3dmodel.model e slice_info.config come in un file di Bambu.
+# Stesso metodo di dnd-tilegen (docs/bambu-3mf.md).
 
 _CONTENT_TYPES = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -644,7 +605,7 @@ _SLICE_INFO = """\
 <config>
   <header>
     <header_item key="X-BBL-Client-Type" value="slicer"/>
-    <header_item key="X-BBL-Client-Version" value="02.06.00.51"/>
+    <header_item key="X-BBL-Client-Version" value="{version}"/>
   </header>
 </config>"""
 
@@ -733,26 +694,18 @@ def export_3mf(mesh, output_path_3mf, color_changes_z, slot_colors=None,
     palette = list(palette_hex) if palette_hex else (
         ["#FFFFFF"] + [slot_colors[i] if i < len(slot_colors) else "#000000"
                        for i in range(len(valid_z))])
-    # L'altezza layer la dichiariamo perche' e' *nostra*: le quote dei cambi
-    # colore sono calcolate su quella, e con un valore diverso cadrebbero in
-    # mezzo a un layer invece che sul suo confine.
-    project_settings = json.dumps({
-        "version": _PROJECT_VERSION,
-        "from": "project",
-        "name": "project_settings",
-        "nozzle_diameter": [f"{float(nozzle_mm):g}"],
-        "filament_colour": palette,
-        "layer_height": str(layer_height),
-        "initial_layer_print_height": str(layer_height),
-        "skirt_loops": _SKIRT_LOOPS,
-    }, indent=4)
-
+    # Il profilo completo di un progetto vero, adattato a questi filamenti
+    # (engine/bambu_profile.py). L'altezza layer resta la *nostra*: le quote
+    # dei cambi colore sono calcolate su quella, e con un valore diverso
+    # cadrebbero in mezzo a un layer invece che sul suo confine.
+    project_settings, versione = build_project_settings(
+        palette, nozzle_mm=nozzle_mm, layer_height=layer_height)
 
     entries = {
         '[Content_Types].xml': _CONTENT_TYPES,
         '_rels/.rels': _ROOT_RELS,
         '3D/3dmodel.model': _ROOT_TPL.format(
-            application=_APPLICATION, today=oggi, title=titolo, dx=dx, dy=dy, dz=dz,
+            application="BambuStudio-" + versione, today=oggi, title=titolo, dx=dx, dy=dy, dz=dz,
             uuid_comp=_id(), uuid_ref=_id(), uuid_build=_id(), uuid_item=_id(),
             **comune),
         '3D/Objects/object_1.model': _OBJECT_TPL.format(
@@ -770,7 +723,7 @@ def export_3mf(mesh, output_path_3mf, color_changes_z, slot_colors=None,
             off_z=round(float(centro[2]), 6), dx=dx, dy=dy, dz=dz),
         'Metadata/project_settings.config': project_settings,
         'Metadata/custom_gcode_per_layer.xml': _CUSTOM_GCODE_TPL.format(layer_nodes=layer_nodes),
-        'Metadata/slice_info.config': _SLICE_INFO,
+        'Metadata/slice_info.config': _SLICE_INFO.format(version=versione),
     }
 
     with zipfile.ZipFile(output_path_3mf, 'w', zipfile.ZIP_DEFLATED) as z:
@@ -936,22 +889,14 @@ def export_3mf_parts(parts, output_path_3mf, palette_hex, object_name="keychain"
         assemble.append(f'   <assemble_item object_id="{root_id}" volume_id="{k - 1}" '
                         f'transform="1 0 0 0 1 0 0 0 1 0 0 0" />')
 
-    project_settings = json.dumps({
-        "version": _PROJECT_VERSION,
-        "from": "project",
-        "name": "project_settings",
-        "nozzle_diameter": [f"{float(nozzle_mm):g}"],
-        "filament_colour": list(palette_hex),
-        "layer_height": str(layer_height),
-        "initial_layer_print_height": str(layer_height),
-        "skirt_loops": _SKIRT_LOOPS,
-    }, indent=4)
+    project_settings, versione = build_project_settings(
+        list(palette_hex), nozzle_mm=nozzle_mm, layer_height=layer_height)
 
     entries = {
         '[Content_Types].xml': _CONTENT_TYPES,
         '_rels/.rels': _ROOT_RELS,
         '3D/3dmodel.model': _MULTI_ROOT_TPL.format(
-            application=_APPLICATION, today=date.today().isoformat(),
+            application="BambuStudio-" + versione, today=date.today().isoformat(),
             title=escape(os.path.splitext(sorgente)[0]), root_id=root_id,
             components="\n".join(components), dx=dx, dy=dy, dz=dz,
             uuid_comp=_id(), uuid_build=_id(), uuid_item=_id(), **comune),
@@ -963,7 +908,7 @@ def export_3mf_parts(parts, output_path_3mf, palette_hex, object_name="keychain"
             parts="\n".join(part_cfg), assemble_volumes="\n".join(assemble),
             dx=dx, dy=dy, dz=dz),
         'Metadata/project_settings.config': project_settings,
-        'Metadata/slice_info.config': _SLICE_INFO,
+        'Metadata/slice_info.config': _SLICE_INFO.format(version=versione),
     }
     with zipfile.ZipFile(output_path_3mf, 'w', zipfile.ZIP_DEFLATED) as z:
         for nome, testo in entries.items():

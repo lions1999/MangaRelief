@@ -8,18 +8,15 @@ rumorosamente se qualcuno tocca l'esportazione senza saperli:
 - senza `BambuStudio:3mfVersion` il file torna "solo geometria";
 - `Application` deve cominciare con `BambuStudio-`: lo stesso identico file con
   `MangaRelief-1.0.0` viene rifiutato;
-- `project_settings.config` vuoto o `{}` non basta — rompe perfino un progetto
-  scritto da Bambu Studio stesso — e la chiave indispensabile e'
-  `nozzle_diameter`, non `printer_technology`;
-- i filamenti dichiarati sono quelli che si stampano e nessun altro.
-
-E una conseguenza che non e' un difetto ma va detta a chi stampa: Bambu Studio
-non FONDE la nostra configurazione col profilo di chi apre il file, ne
-costruisce uno nuovo intitolato al progetto — per questo Stampante, Filamenti
-e Processo si chiamano tutti "(nomefile.3mf)" — e ogni chiave che non nominiamo
-prende il valore di fabbrica. Dichiararne di piu' non aiuterebbe: sarebbe
-un'altra impostazione imposta al posto della sua. L'unico rimedio e' dirlo, e
-qui si verifica che venga detto davvero.
+- `project_settings.config` e' il profilo COMPLETO di un progetto salvato da
+  Bambu Studio (assets/bambu/, engine/bambu_profile.py), non il minimo per
+  aprirsi. Col minimo (cinque chiavi) Bambu inventava stampante, filamenti e
+  processo intitolati al file con i valori di fabbrica, MakerWorld rifiutava
+  il processo, e `bambu-studio --slice` andava in crash (0xC0000005). Col
+  profilo completo i file si affettano dalla riga di comando con i filamenti
+  del profilo (`GFA00`, PLA Basic) e i cambi alle quote dichiarate;
+- i filamenti dichiarati sono quelli che si stampano e nessun altro, e le
+  ~140 liste per filamento del profilo vanno ridimensionate con loro.
 
     python tests/tremmeffe_bambu.py
 """
@@ -38,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import zipfile  # noqa: E402
 
 from engine import GenerationMode, GenerationParams, generate  # noqa: E402
+from engine.bambu_profile import _per_filament_keys  # noqa: E402
 
 fails = []
 
@@ -94,24 +92,38 @@ for colori in (2, 3, 4):
           app.startswith("BambuStudio-"), app)
     check(f"{n}: con una versione interpretabile", re.fullmatch(r"[\d.]+", app.split("-", 1)[1]), app)
 
-    # --- le impostazioni di progetto: il minimo, e nient'altro
-    check(f"{n}: project_settings non e' vuoto", len(cfg) > 0)
-    check(f"{n}: c'e' nozzle_diameter, la chiave senza cui non apre",
-          cfg.get("nozzle_diameter") == ["0.4"], cfg.get("nozzle_diameter"))
-    # Quello che si dichiara qui sostituisce il profilo di chi apre il file, non
-    # ci si aggiunge: ogni chiave in piu' e' un'impostazione imposta a lui.
-    # Quindi solo quelle che riguardano *questo* oggetto.
-    check(f"{n}: nessuna impostazione di stampa altrui",
-          set(cfg) == {"version", "from", "name", "nozzle_diameter", "filament_colour",
-                       "layer_height", "initial_layer_print_height", "skirt_loops"},
-          sorted(cfg))
+    # --- le impostazioni di progetto: un profilo vero, ridimensionato
+    check(f"{n}: profilo completo di un progetto Bambu", len(cfg) > 500, len(cfg))
+    check(f"{n}: stampante, processo e filamenti sono preset di serie",
+          cfg["printer_settings_id"] == "Bambu Lab A1 0.4 nozzle"
+          and cfg["print_settings_id"] == "0.20mm Standard @BBL A1"
+          and cfg["filament_settings_id"] == ["Bambu PLA Basic @BBL A1"] * colori,
+          (cfg["printer_settings_id"], cfg["print_settings_id"], cfg["filament_settings_id"]))
+    check(f"{n}: l'ugello e' quello scelto", cfg["nozzle_diameter"] == ["0.4"], cfg["nozzle_diameter"])
+    versione = app.split("-", 1)[1]
+    check(f"{n}: stessa versione nel guscio, nel profilo e in slice_info",
+          cfg["version"] == versione
+          and f'value="{versione}"' in z.read("Metadata/slice_info.config").decode(),
+          (versione, cfg["version"]))
+    # Le liste per filamento seguono il numero di filamenti. Se una restasse a
+    # 4 su un file a 2, Bambu leggerebbe bobine fantasma o scarterebbe la chiave.
+    # Si controlla la lunghezza ATTESA di ogni tipo di chiave, non "nessuna
+    # lista lunga 4": a 2 filamenti 2n, n x n e n + 2 fanno 4 anche loro.
+    sbagliate = {k: len(cfg[k]) for k in _per_filament_keys() if len(cfg[k]) != colori}
+    check(f"{n}: ogni lista per filamento e' lunga {colori}", not sbagliate, sbagliate)
+    check(f"{n}: spurghi {colori}x{colori}, vettore 2n, posti n+2, indici 1..n",
+          len(cfg["flush_volumes_matrix"]) == colori * colori
+          and len(cfg["flush_volumes_vector"]) == 2 * colori
+          and len(cfg["different_settings_to_system"]) == colori + 2
+          and cfg["filament_self_index"] == [str(i + 1) for i in range(colori)])
+    check(f"{n}: il piatto ha ancora quattro angoli", len(cfg["printable_area"]) == 4)
     check(f"{n}: l'altezza layer e' quella su cui sono calcolate le quote",
           cfg["layer_height"] == "0.2" and cfg["initial_layer_print_height"] == "0.2",
           (cfg["layer_height"], cfg["initial_layer_print_height"]))
-    # Un giro di perimetro sul primo layer, in filamento 1: su una lastra larga
-    # non serve, e a occhio sembra un bordo del disegno. Era il valore di
-    # fabbrica, ed e' cosi' che si e' scoperto tutto il resto.
     check(f"{n}: niente skirt", cfg["skirt_loops"] == "0", cfg["skirt_loops"])
+    blob = json.dumps(cfg).lower()
+    check(f"{n}: nessun dato personale nel profilo",
+          not any(w in blob for w in ("users\\", "c:\\", "d:\\", "http", "apikey", "access_code")))
 
     # --- i filamenti: quelli che si stampano, in ordine di stampa
     palette = cfg["filament_colour"]
@@ -142,28 +154,25 @@ for colori in (2, 3, 4):
     print()
 
 # ---------------------------------------------------------------------------
-# Il file non dichiara nomi di profilo, e proprio per questo chi lo apre deve
-# sceglierli a mano: le due cose vanno verificate insieme, o si finisce col
-# togliere l'avvertenza perche' "il file e' a posto" — che e' vero e
-# irrilevante.
-print("--- i profili di chi apre ---")
-
-cfg_ultimo = json.loads(zipfile.ZipFile(r.mf3_path).read("Metadata/project_settings.config"))
-# L'ugello dichiarato deve essere quello scelto: era cablato a 0,4, e chi ne ha
-# uno diverso si trovava nel progetto un valore che non e' il suo.
-for _n in (0.2, 0.6):
+# L'ugello sceglie il profilo: per 0,2 c'e' un modello suo (A1 0.2, 0.10mm);
+# per uno senza modello si usa il piu' vicino e si dichiara il diametro vero.
+print("--- ugello e altezza layer ---")
+for _n, _stampante in ((0.2, "Bambu Lab A1 0.2 nozzle"), (0.6, "Bambu Lab A1 0.4 nozzle")):
     _p = GenerationParams(mode=GenerationMode.STANDARD, max_dim=60.0, base_h=1.0,
                           max_h=2.4, layer_height=0.1, nozzle_mm=_n,
                           max_res_cap=400, smart_decimate=False,
                           output_path_3mf=os.path.join(d, f"ug{_n}.3mf"))
     _c = json.loads(zipfile.ZipFile(generate(img, _p).mf3_path)
                     .read("Metadata/project_settings.config"))
-    check(f"il 3MF dichiara l'ugello scelto ({_n} mm)",
-          _c["nozzle_diameter"] == [f"{_n:g}"], _c["nozzle_diameter"])
-
-check("non dichiariamo nomi di profilo (quindi Bambu ne inventa uno col nome del file)",
-      not any(k.endswith("_settings_id") for k in cfg_ultimo),
-      [k for k in cfg_ultimo if k.endswith("_settings_id")] or sorted(cfg_ultimo))
+    check(f"il 3MF dichiara l'ugello scelto ({_n} mm) sul profilo giusto",
+          _c["nozzle_diameter"] == [f"{_n:g}"] and _c["printer_settings_id"] == _stampante,
+          (_c["nozzle_diameter"], _c["printer_settings_id"]))
+    check(f"...a layer 0,1 ({_n} mm)", _c["layer_height"] == "0.1", _c["layer_height"])
+    # 0,1 e' il layer del processo 0.2 (nessuna modifica); su 0,4 e' una
+    # modifica, e va dichiarata come tale o Bambu non la mostra.
+    _mod = _c["different_settings_to_system"][0].split(";")
+    check(f"...e la modifica al processo e' dichiarata solo se c'e' ({_n} mm)",
+          ("layer_height" in _mod) == (_n != 0.2), _c["different_settings_to_system"][0])
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E402
@@ -182,18 +191,14 @@ _win.show()
 _win.load_image()
 _win.on_generate_done(os.path.join(d, "x.stl"), os.path.join(d, "x.3mf"))
 _msg = _visto.get("msg", "")
-check("esportando un 3MF, il popup dice di scegliere i propri profili",
-      "Printer, Filament and Process" in _msg and "dropdowns" in _msg,
-      _msg[:60])
-check("...e spiega che i valori mancanti sono quelli di fabbrica",
-      "factory values" in _msg)
+check("esportando un 3MF, il popup dice quale profilo c'e' dentro",
+      "Bambu Lab A1" in _msg and "PLA Basic" in _msg, _msg[:80])
+check("...e come passare alla propria stampante",
+      "Printer dropdown" in _msg)
 check("...e chiede di non cambiare l'altezza layer, su cui stanno i cambi",
       "layer" in _msg and "colour changes" in _msg)
-# Il processo e' l'unica delle tre tendine che non si aggiusta scegliendo la
-# stampante, ed e' quella su cui MakerWorld rifiuta l'upload: un progetto il cui
-# processo si chiama ancora come il file e' un preset personalizzato.
-check("...e avverte che MakerWorld rifiuta un processo col nome del file",
-      "MakerWorld" in _msg and "Process dropdown" in _msg)
+check("...e non dice piu' che i profili si chiamano come il file",
+      "factory values" not in _msg and "named after the file" not in _msg)
 
 _visto.clear()
 _win.on_generate_done(os.path.join(d, "x.stl"), "")
