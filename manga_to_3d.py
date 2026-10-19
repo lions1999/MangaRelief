@@ -9,7 +9,7 @@ import pillow_heif
 import ctypes
 
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QListWidgetItem
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 from PyQt6.QtCore import Qt, QTimer
 
 from utils import resource_path
@@ -138,6 +138,7 @@ class Manga3DAppController(MainWindowUI):
         self.btn_cutout_paint.clicked.connect(self._load_paint_mask)
         self.btn_cutout_edit.toggled.connect(self._on_cutout_edit_toggled)
         self.btn_cutout_brush.toggled.connect(self._on_cutout_brush_toggled)
+        QShortcut(QKeySequence.StandardKey.Undo, self, activated=self._undo_cutout)
         self.btn_cutout_reset.clicked.connect(self._reset_cutout)
         self.btn_cutout_preview.toggled.connect(self._on_cutout_preview_toggled)
         self.slider_cutout_border.valueChanged.connect(self._on_cutout_border_changed)
@@ -770,6 +771,7 @@ class Manga3DAppController(MainWindowUI):
         self._refresh_cutout_preview()
 
     def _reset_cutout(self):
+        self._push_cutout_undo()
         self.cutout_cut_seeds = []
         self.cutout_keep_seeds = []
         self.cutout_brush = None
@@ -880,6 +882,7 @@ class Manga3DAppController(MainWindowUI):
         Ritorna True se il click e' stato consumato dal ritaglio.
         """
         if self.btn_cutout_ring.isChecked():
+            self._push_cutout_undo()
             self.cutout_ring_xy = (int(x), int(y))
             self.btn_cutout_ring.setChecked(False)
             if not self.chk_cutout_ring.isChecked():
@@ -906,6 +909,7 @@ class Manga3DAppController(MainWindowUI):
             return True
 
         pt = (int(x), int(y))
+        self._push_cutout_undo()
         # Lo stato di una regione e' l'automatismo piu' le correzioni, quindi
         # per commutare si guarda dove sta ADESSO e si scrive il seme opposto,
         # ripulendo l'altra lista: due semi contrastanti sulla stessa regione
@@ -937,7 +941,7 @@ class Manga3DAppController(MainWindowUI):
             return
         self.lbl_status.setText(
             "🖌 Drag on the preview to paint (right-drag pans, wheel zooms). "
-            "Reset clears the brush too.")
+            "Ctrl+Z undoes the last stroke, Reset clears everything.")
 
     def _brush_paint(self, x, y):
         if not self.btn_cutout_brush.isChecked():
@@ -946,17 +950,44 @@ class Manga3DAppController(MainWindowUI):
         if src is None:
             return
         shape = seg_shape_for(src.shape[:2], SEG_MAX_RES)
+        last = getattr(self, '_brush_last', None)
+        if last is None:
+            self._push_cutout_undo()   # una pennellata = un passo di Ctrl+Z
         if self.cutout_brush is None or self.cutout_brush.shape != shape:
             self.cutout_brush = np.zeros(shape, np.int8)
         val = 1 if self.combo_brush_mode.currentIndex() == 0 else -1
-        cv2.circle(self.cutout_brush, (int(x), int(y)),
-                   max(1, self.spin_brush_size.value() // 2), val, -1)
+        size = max(1, self.spin_brush_size.value())
+        pt = (int(x), int(y))
+        # una linea dal punto precedente: col solo cerchio, un trascinamento
+        # veloce lascia una fila di pallini staccati
+        cv2.line(self.cutout_brush, last or pt, pt, val, size)
+        cv2.circle(self.cutout_brush, pt, max(1, size // 2), val, -1)
+        self._brush_last = pt
         # Anteprima ogni ~150 ms mentre si trascina, non a ogni movimento.
         self._refresh_cutout_preview_throttled()
 
     def _brush_released(self):
+        self._brush_last = None
         if self.btn_cutout_brush.isChecked():
             self._do_refresh_cutout_preview()
+
+    def _push_cutout_undo(self):
+        """Fotografa le correzioni del ritaglio prima di cambiarle."""
+        stack = self.__dict__.setdefault('_cutout_undo', [])
+        stack.append((list(self.cutout_cut_seeds), list(self.cutout_keep_seeds),
+                      None if self.cutout_brush is None else self.cutout_brush.copy(),
+                      self.cutout_ring_xy))
+        del stack[:-30]   # ~1,6 MB a passo col pennello: ne bastano 30
+
+    def _undo_cutout(self):
+        stack = getattr(self, '_cutout_undo', [])
+        if not stack:
+            self.lbl_status.setText("Nothing to undo.")
+            return
+        (self.cutout_cut_seeds, self.cutout_keep_seeds,
+         self.cutout_brush, self.cutout_ring_xy) = stack.pop()
+        self._do_refresh_cutout_preview()
+        self.lbl_status.setText("↶ Last cutout edit undone.")
 
     def _refresh_cutout_preview_throttled(self):
         if getattr(self, '_brush_timer', None) is None:
@@ -1315,6 +1346,7 @@ class Manga3DAppController(MainWindowUI):
         self.btn_cover_preview.setEnabled(True)
         # Il ritaglio e' fatto di scelte su QUESTA immagine: i semi di un'altra
         # nominerebbero regioni che non esistono piu'.
+        self._cutout_undo = []
         self.btn_cutout_preview.setChecked(False)
         self.btn_cutout_edit.setChecked(False)
         self.btn_cutout_ring.setChecked(False)

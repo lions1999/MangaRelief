@@ -486,6 +486,7 @@ win.spin_brush_size.setValue(40)
 win.on_pixel_clicked(*P_CUPOLA)
 check("pennello Erase: la cupola (tenuta dalle regioni) diventa vuoto",
       not win._compute_cutout_now().mask[P_CUPOLA[1], P_CUPOLA[0]])
+win._brush_released()                               # fine pennellata
 win.combo_brush_mode.setCurrentIndex(0)            # Add material
 # una linguetta che parte dalla corona (y~30) e sale nello sfondo: un'isola
 # staccata verrebbe scartata da keep_largest, ed e' giusto cosi'
@@ -493,6 +494,31 @@ for y in range(45, 4, -5):                          # un trascinamento
     win._brush_paint(450, y)
 check("pennello Add: lo sfondo esterno dipinto diventa materiale",
       win._compute_cutout_now().mask[12, 450])
+win._brush_released()
+win._undo_cutout()
+m = win._compute_cutout_now().mask
+check("Ctrl+Z toglie solo l'ultima pennellata",
+      not m[12, 450] and not m[P_CUPOLA[1], P_CUPOLA[0]])
+win._undo_cutout()
+check("secondo Ctrl+Z toglie anche l'Erase",
+      win._compute_cutout_now().mask[P_CUPOLA[1], P_CUPOLA[0]])
+
+# Il pennello lavora sulla sagoma finale: un tocco fuori dal disegno non si
+# prende il bordino attorno. E il bordino e' tondo, non quadrato.
+sq = np.full((400, 400, 3), 255, np.uint8)
+sq[150:250, 150:250] = 0
+nudo = compute_cutout(sq, max_dim=40.0, border_mm=4.0)
+r = 150 - nudo.bbox[0]                                  # raggio del bordino in px
+d = int(r * 0.6)                                        # dentro il disco (0,85 r)
+check("bordino tondo: l'angolo in diagonale resta vuoto",
+      r > 5 and nudo.mask[150 - d, 150 - d] and not nudo.mask[150 - r + 1, 150 - r + 1],
+      f"r={r}")
+pen = np.zeros((400, 400), np.int8)
+cv2.circle(pen, (250 + r + 3, 200), 6, 1, -1)           # attaccato al bordino
+tocco = compute_cutout(sq, max_dim=40.0, border_mm=4.0, brush=pen)
+agg = int(tocco.mask.sum() - nudo.mask.sum())
+check("pennello col bordino: aggiunge solo cio' che si dipinge",
+      0 < agg <= int((pen > 0).sum()), f"aggiunti {agg} px, dipinti {(pen > 0).sum()}")
 win._reset_cutout()
 check("Reset cancella anche il pennello", win.cutout_brush is None
       and win._compute_cutout_now().mask[P_CUPOLA[1], P_CUPOLA[0]])

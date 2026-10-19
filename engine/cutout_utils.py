@@ -283,7 +283,9 @@ def dilate_mask(mask: np.ndarray, px: int) -> np.ndarray:
     if px <= 0:
         return mask
     k = 2 * px + 1
-    return cv2.dilate(mask.astype(np.uint8), np.ones((k, k), np.uint8)).astype(bool)
+    # disco, non quadrato: col quadrato il bordino faceva spigoli vivi
+    disc = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    return cv2.dilate(mask.astype(np.uint8), disc).astype(bool)
 
 
 def _disc(shape, cx: float, cy: float, r: float) -> np.ndarray:
@@ -410,8 +412,8 @@ def compute_cutout(image: np.ndarray, *,
 
     `regions`: una segmentazione gia' calcolata, per non rifarla a ogni click.
     `brush`: ritocchi a mano sul raster di segmentazione, int8: +1 materiale,
-    -1 vuoto, 0 lascia stare. Vince su regioni e maschera dipinta: serve dove
-    un contorno aperto fa colare una regione nello sfondo.
+    -1 vuoto, 0 lascia stare. Applicato dopo il bordino e prima di occhiello
+    e pulizia: vince su regioni, maschera dipinta e bordino.
     """
     seg_h, seg_w = seg_shape_for(image.shape[:2], seg_res)
 
@@ -426,13 +428,11 @@ def compute_cutout(image: np.ndarray, *,
             regions = segment_regions(image, white_clip=white_clip, seg_res=seg_res)
         base = mask_from_regions(regions, resolve_cut_flags(regions, cut_seeds, keep_seeds))
 
-    if brush is not None:
-        if brush.shape != base.shape:
-            brush = cv2.resize(brush, (base.shape[1], base.shape[0]),
-                               interpolation=cv2.INTER_NEAREST)
-        base = (base | (brush > 0)) & ~(brush < 0)
-
-    if not base.any():
+    if brush is not None and brush.shape != base.shape:
+        brush = cv2.resize(brush, (base.shape[1], base.shape[0]),
+                           interpolation=cv2.INTER_NEAREST)
+    # senza disegno ne' pennello non c'e' pezzo
+    if not base.any() and (brush is None or not (brush > 0).any()):
         return CutoutResult(mask=base, bbox=None, regions=regions, empty=True)
 
     result = None
@@ -441,6 +441,11 @@ def compute_cutout(image: np.ndarray, *,
         mask = base
         if border_mm > 0:
             mask = dilate_mask(mask, int(round((border_mm / 2.0) / pitch)))
+        # Il pennello lavora sulla sagoma FINALE, bordino compreso: quello che
+        # si dipinge e' quello che si stampa. Prima del bordino un tocco
+        # minimo cresceva di border_mm tutto attorno.
+        if brush is not None:
+            mask = (mask | (brush > 0)) & ~(brush < 0)
 
         attached, corona = True, None
         if ring_xy is not None:
