@@ -378,6 +378,9 @@ class CutoutResult:
     # portarla a tutta altezza. Dove l'anello cade dentro il disegno e' vuota,
     # ed e' cosi' che l'arte attorno al foro resta con le sue quote.
     ring_mask: Optional[np.ndarray] = None
+    # Quello che il bordino da sticker ha aggiunto attorno al disegno (e
+    # l'occhiello, se sporge): la stampa piatta lo colora a scelta.
+    border_mask: Optional[np.ndarray] = None
     empty: bool = False
 
 
@@ -451,7 +454,8 @@ def compute_cutout(image: np.ndarray, *,
         result = CutoutResult(mask=mask, bbox=bbox, regions=regions,
                               pitch_mm=pitch, n_pieces=n_pieces,
                               ring_attached=attached,
-                              ring_mask=(corona & mask) if corona is not None else None)
+                              ring_mask=(corona & mask) if corona is not None else None,
+                              border_mask=(mask & ~base) if border_mm > 0 else None)
 
     return result
 

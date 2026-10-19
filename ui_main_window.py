@@ -265,8 +265,10 @@ class MainWindowUI(QMainWindow):
         cut_form_top.addRow("Print:", self.combo_keychain_print)
 
         self.flat_options = QWidget()
-        flat_row = QHBoxLayout(self.flat_options)
-        flat_row.setContentsMargins(0, 0, 0, 0)
+        flat_box = QVBoxLayout(self.flat_options)
+        flat_box.setContentsMargins(0, 0, 0, 0)
+        flat_row = QHBoxLayout()
+        flat_box.addLayout(flat_row)
         self.chk_flat_face_down = QCheckBox("Face down")
         self.chk_flat_face_down.setChecked(True)
         self.chk_flat_face_down.setToolTip(
@@ -286,6 +288,22 @@ class MainWindowUI(QMainWindow):
         flat_row.addStretch()
         flat_row.addWidget(self.lbl_flat_layers)
         flat_row.addWidget(self.spin_flat_layers)
+
+        # In piatto il colore non cambia le quote, quindi bordino e occhiello
+        # possono essere di qualunque filamento della palette.
+        flat_colors = QHBoxLayout()
+        self.combo_flat_border = QComboBox()
+        self.combo_flat_ring = QComboBox()
+        for combo, default in ((self.combo_flat_border, 0), (self.combo_flat_ring, 1)):
+            combo.addItems(["White", "Black", "Accent 1", "Accent 2"])
+            combo.setCurrentIndex(default)
+        self.combo_flat_border.setToolTip("Colour of the sticker border (Sticker border slider).")
+        self.combo_flat_ring.setToolTip("Colour of the keyring loop.")
+        flat_colors.addWidget(QLabel("Border:"))
+        flat_colors.addWidget(self.combo_flat_border)
+        flat_colors.addWidget(QLabel("Ring:"))
+        flat_colors.addWidget(self.combo_flat_ring)
+        flat_box.addLayout(flat_colors)
         cut_form_top.addRow(self.flat_options)
         self.flat_options.setVisible(False)
         self._flat_saved_maxh = None   # il Max Z del rilievo a strati, da restituire
@@ -368,7 +386,8 @@ class MainWindowUI(QMainWindow):
 
         self.cutout_widgets = [
             self.combo_keychain_finish, self.combo_keychain_print,
-            self.chk_flat_face_down, self.spin_flat_layers, self.combo_cutout_src,
+            self.chk_flat_face_down, self.spin_flat_layers,
+            self.combo_flat_border, self.combo_flat_ring, self.combo_cutout_src,
             self.btn_cutout_paint, self.btn_cutout_edit, self.btn_cutout_reset,
             self.slider_cutout_border, self.chk_cutout_ring,
             self.btn_cutout_ring, self.spin_ring_d, self.btn_cutout_preview,

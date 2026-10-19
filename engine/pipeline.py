@@ -433,7 +433,8 @@ def flat_filament_changes(n_face_colors: int, face_layers: int) -> int:
     return face_layers * (n_face_colors - 1) + 1
 
 
-def _generate_flat(p: GenerationParams, img_work, palette, cutout_mask, emit, check_cancel):
+def _generate_flat(p: GenerationParams, img_work, palette, cutout_mask, emit, check_cancel,
+                   ring=None, border=None):
     """Portachiavi a stampa piatta: una parte per colore, tutte alla stessa
     quota, e un corpo di un filamento solo.
 
@@ -447,6 +448,13 @@ def _generate_flat(p: GenerationParams, img_work, palette, cutout_mask, emit, ch
     mask = resize_mask(cutout_mask, img_rgb.shape[:2])
     indices = classify_palette_indices(img_rgb, palette, max_dim=p.max_dim,
                                        min_feature_mm=0.5)
+    # Bordino e occhiello col colore scelto, dopo la classificazione: in piatto
+    # il colore non tocca le quote. L'occhiello dopo il bordino, che lo contiene.
+    pal = np.array(palette, dtype=float)
+    for zona, rgb in ((border, p.flat_border_rgb), (ring, p.flat_ring_rgb)):
+        if zona is not None and rgb is not None and zona.any():
+            k = int(np.argmin(((pal - np.array(rgb, dtype=float)) ** 2).sum(axis=1)))
+            indices[resize_mask(zona, indices.shape) & mask] = k
     check_cancel()
 
     face_depth = round(p.flat_face_layers * p.layer_height, 3)
@@ -554,7 +562,7 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
     # scegliere come colorare l'arte, e le due strade sono quelle che il
     # motore ha già — Spot Color (base bianca + accenti + nero) o la
     # posterizzazione Standard.
-    cutout_mask = cutout_ring = None
+    cutout_mask = cutout_ring = cutout_border = None
     cutout_pieces, cutout_ring_ok = 0, True
     if p.is_keychain_mode and p.keychain_flat:
         _check_flat_params(p)
@@ -576,6 +584,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
         cutout_mask = crop(cut.mask, cut.bbox)
         cutout_ring = (crop(cut.ring_mask, cut.bbox)
                        if cut.ring_mask is not None else None)
+        cutout_border = (crop(cut.border_mask, cut.bbox)
+                         if cut.border_mask is not None else None)
         img_work = _crop_source_to(img_work, cut.bbox, cut.mask.shape[:2])
         cutout_pieces, cutout_ring_ok = cut.n_pieces, cut.ring_attached
         check_cancel()
@@ -665,7 +675,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
     if p.is_keychain_mode and p.keychain_flat:
         # La stampa piatta ha la sua uscita: niente terrazze da decimare ne'
         # quote da risnappare, e un 3MF fatto di parti invece che di cambi.
-        result = _generate_flat(p, img_work, topo_colors, cutout_mask, emit, check_cancel)
+        result = _generate_flat(p, img_work, topo_colors, cutout_mask, emit, check_cancel,
+                                ring=cutout_ring, border=cutout_border)
         result.cutout_n_pieces = cutout_pieces
         result.cutout_ring_attached = cutout_ring_ok
         result.elapsed_s = time.time() - t_start_total

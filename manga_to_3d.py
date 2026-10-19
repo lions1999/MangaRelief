@@ -23,6 +23,7 @@ from engine.color_utils import (extract_dominant_colors, suggest_midtones, featu
 from engine.cutout_utils import (SEG_MAX_RES, compute_cutout, overlay_preview,
                                   segment_regions, to_seg_raster)
 from engine.mesh_utils import compute_topo_z_heights, compute_topo_switch_z
+from engine.config import SPOT_BASE_RGB, SPOT_TOP_RGB
 from engine.case_utils import (load_phone_presets, build_plate_raster,
                         build_case_plate_raster, compose_plate_art)
 from worker import MeshWorker
@@ -400,6 +401,17 @@ class Manga3DAppController(MainWindowUI):
         """Accenti attivi (1 o 2 in base al selettore), senza i None."""
         n = self.combo_spot_naccents.currentIndex() + 1
         return [a for a in self.spot_accents[:n] if a is not None]
+
+    def _flat_choice_rgb(self, combo):
+        """White / Black / Accent 1 / Accent 2 -> RGB della palette Spot.
+        Un accento non campionato vale None: resta il colore del disegno."""
+        i = combo.currentIndex()
+        if i == 0:
+            return SPOT_BASE_RGB
+        if i == 1:
+            return SPOT_TOP_RGB
+        acc = self.spot_accents[i - 2] if i - 2 < len(self.spot_accents) else None
+        return tuple(acc) if acc is not None and acc in self._get_spot_accents() else None
 
     def set_active_spot_swatch(self, idx):
         if getattr(self, 'img_rgb_original', None) is None:
@@ -1559,6 +1571,8 @@ class Manga3DAppController(MainWindowUI):
             keychain_flat=self._keychain_flat(),
             flat_face_layers=self.spin_flat_layers.value(),
             flat_face_down=self.chk_flat_face_down.isChecked(),
+            flat_border_rgb=self._flat_choice_rgb(self.combo_flat_border),
+            flat_ring_rgb=self._flat_choice_rgb(self.combo_flat_ring),
             cutout_cut_seeds=list(self.cutout_cut_seeds),
             cutout_keep_seeds=list(self.cutout_keep_seeds),
             cutout_paint_mask=(self.cutout_paint_mask

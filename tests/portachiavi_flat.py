@@ -218,6 +218,29 @@ check("senza pixel blu: tre filamenti, non quattro",
 
 
 # ---------------------------------------------------------------------------
+print("\n=== COLORE DI BORDINO E OCCHIELLO ===")
+
+
+def aree_facce(**kw):
+    """Area (mm2) di ogni faccia colorata, per colore."""
+    r = generate(IMG, params(cutout_border_mm=2.0, cutout_ring=True, cutout_ring_xy=(450, 40),
+                             output_path_3mf=os.path.join(TMP, "bordo.3mf"), **kw))
+    _, ms, _, pp, _, _ = leggi_3mf(r.mf3_path)
+    return {pp[k]["name"].split()[-1]: m.volume / FACE
+            for k, m in ms.items() if pp[k]["name"].startswith("Face")}
+
+
+base = aree_facce()
+scelti = aree_facce(flat_border_rgb=ROSSO, flat_ring_rgb=BLU)
+check("bordino rosso: la faccia rossa cresce, la bianca cala",
+      scelti["#dc1e1e"] > base["#dc1e1e"] + 5 and scelti["#f5f5f5"] < base["#f5f5f5"] - 5,
+      (round(base["#dc1e1e"]), round(scelti["#dc1e1e"])))
+check("occhiello blu: la faccia blu cresce, la nera cala",
+      scelti["#1e3cdc"] > base["#1e3cdc"] + 2 and scelti["#141414"] < base["#141414"] - 2,
+      (round(base["#1e3cdc"]), round(scelti["#1e3cdc"])))
+check("i colori scelti non cambiano l'area totale della faccia",
+      abs(sum(scelti.values()) - sum(base.values())) < 1e-6)
+
 print("\n=== RIFIUTI ===")
 try:
     generate(IMG, params(keychain_finish_spot=False))

@@ -88,6 +88,10 @@ class GenerationParams:
     # lo spessore e' base_h + questi layer (max_h non si legge)
     flat_face_layers: int = 3
     flat_face_down: bool = True     # faccia sul piatto (e immagine specchiata)
+    # Colore di bordino e occhiello in piatto, come RGB di un colore della
+    # palette Spot. None = come escono dal disegno (bordino bianco, occhiello nero).
+    flat_border_rgb: Optional[Tuple[int, int, int]] = None
+    flat_ring_rgb: Optional[Tuple[int, int, int]] = None
 
     # Le correzioni all'automatismo viaggiano come SEMI, non come raster: una
     # lista di (x, y) che nominano una regione. Le coordinate sono quelle del
