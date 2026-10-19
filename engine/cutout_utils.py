@@ -397,7 +397,8 @@ def compute_cutout(image: np.ndarray, *,
                    ring_xy: Optional[Tuple[int, int]] = None,
                    ring_d_mm: float = 4.0,
                    ring_rim_mm: float = 2.0,
-                   regions: Optional[RegionMap] = None) -> CutoutResult:
+                   regions: Optional[RegionMap] = None,
+                   brush: Optional[np.ndarray] = None) -> CutoutResult:
     """Dalla sorgente alla sagoma, sul raster di segmentazione.
 
     Il passaggio in millimetri non e' immediato: `max_dim` misura il *pezzo
@@ -408,6 +409,9 @@ def compute_cutout(image: np.ndarray, *,
     due giri bastano, il terzo cambierebbe le cifre dopo la virgola.
 
     `regions`: una segmentazione gia' calcolata, per non rifarla a ogni click.
+    `brush`: ritocchi a mano sul raster di segmentazione, int8: +1 materiale,
+    -1 vuoto, 0 lascia stare. Vince su regioni e maschera dipinta: serve dove
+    un contorno aperto fa colare una regione nello sfondo.
     """
     seg_h, seg_w = seg_shape_for(image.shape[:2], seg_res)
 
@@ -421,6 +425,12 @@ def compute_cutout(image: np.ndarray, *,
         if regions is None:
             regions = segment_regions(image, white_clip=white_clip, seg_res=seg_res)
         base = mask_from_regions(regions, resolve_cut_flags(regions, cut_seeds, keep_seeds))
+
+    if brush is not None:
+        if brush.shape != base.shape:
+            brush = cv2.resize(brush, (base.shape[1], base.shape[0]),
+                               interpolation=cv2.INTER_NEAREST)
+        base = (base | (brush > 0)) & ~(brush < 0)
 
     if not base.any():
         return CutoutResult(mask=base, bbox=None, regions=regions, empty=True)

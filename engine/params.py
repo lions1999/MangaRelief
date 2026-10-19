@@ -104,6 +104,9 @@ class GenerationParams:
     # Strada alternativa: la maschera dipinta a mano (giallo = stampa). Se c'e',
     # sostituisce del tutto segmentazione e semi.
     cutout_paint_mask: Optional[Any] = None      # ndarray RGB
+    # Ritocchi a pennello sul raster di segmentazione (int8: +1 materiale,
+    # -1 vuoto). Vincono su regioni e maschera dipinta.
+    cutout_brush: Optional[Any] = None
     cutout_seg_res: int = 1600
     cutout_border_mm: float = 0.0                # bordino da sticker
     cutout_min_feature_mm: float = 0.8           # pulviscolo e fori sotto soglia
@@ -164,6 +167,8 @@ class GenerationParams:
         pm = d.get('cutout_paint_mask')
         if pm is not None:
             d['cutout_paint_mask'] = f"<mask {getattr(self.cutout_paint_mask, 'shape', '?')}>"
+        if d.get('cutout_brush') is not None:
+            d['cutout_brush'] = f"<brush {getattr(self.cutout_brush, 'shape', '?')}>"
         return d
 
 

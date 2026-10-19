@@ -21,7 +21,7 @@ from engine.color_utils import (extract_dominant_colors, suggest_midtones, featu
                          downsample_for_analysis, build_spot_palette,
                          grayscale_palette)
 from engine.cutout_utils import (SEG_MAX_RES, compute_cutout, overlay_preview,
-                                  segment_regions, to_seg_raster)
+                                  segment_regions, to_seg_raster, seg_shape_for)
 from engine.mesh_utils import compute_topo_z_heights, compute_topo_switch_z
 from engine.config import SPOT_BASE_RGB, SPOT_TOP_RGB
 from engine.case_utils import (load_phone_presets, build_plate_raster,
@@ -69,6 +69,7 @@ class Manga3DAppController(MainWindowUI):
         self.cutout_cut_seeds = []
         self.cutout_keep_seeds = []
         self.cutout_paint_mask = None
+        self.cutout_brush = None
         self.cutout_ring_xy = None
         self._cutout_regions = None
         self._cutout_regions_key = None
@@ -92,6 +93,8 @@ class Manga3DAppController(MainWindowUI):
         self.btn_load.clicked.connect(self.load_image)
         self.btn_generate.clicked.connect(self.generate_stl)
         self.viewer.pixelClicked.connect(self.on_pixel_clicked)
+        self.viewer.pixelDragged.connect(self._brush_paint)
+        self.viewer.leftReleased.connect(self._brush_released)
         
         for i, btn in enumerate(self.swatches):
             btn.clicked.connect(lambda checked, idx=i: self.set_active_swatch(idx))
@@ -134,6 +137,7 @@ class Manga3DAppController(MainWindowUI):
         self.combo_cutout_src.currentIndexChanged.connect(self._on_cutout_source_changed)
         self.btn_cutout_paint.clicked.connect(self._load_paint_mask)
         self.btn_cutout_edit.toggled.connect(self._on_cutout_edit_toggled)
+        self.btn_cutout_brush.toggled.connect(self._on_cutout_brush_toggled)
         self.btn_cutout_reset.clicked.connect(self._reset_cutout)
         self.btn_cutout_preview.toggled.connect(self._on_cutout_preview_toggled)
         self.slider_cutout_border.valueChanged.connect(self._on_cutout_border_changed)
@@ -705,6 +709,7 @@ class Manga3DAppController(MainWindowUI):
                         if self.combo_cutout_src.currentIndex() == 1 else None),
             cut_seeds=list(self.cutout_cut_seeds),
             keep_seeds=list(self.cutout_keep_seeds),
+            brush=self.cutout_brush,
             border_mm=self.slider_cutout_border.value() / 10.0,
             ring_xy=(self.cutout_ring_xy if self.chk_cutout_ring.isChecked() else None),
             ring_d_mm=self.spin_ring_d.value(),
@@ -767,6 +772,7 @@ class Manga3DAppController(MainWindowUI):
     def _reset_cutout(self):
         self.cutout_cut_seeds = []
         self.cutout_keep_seeds = []
+        self.cutout_brush = None
         self.cutout_ring_xy = None
         self._refresh_cutout_preview()
         self.lbl_status.setText("↺ Regions back to the automatic rule.")
@@ -785,6 +791,7 @@ class Manga3DAppController(MainWindowUI):
         """
         if checked:
             self.btn_cutout_ring.setChecked(False)
+            self.btn_cutout_brush.setChecked(False)
             self.btn_cutout_preview.setChecked(True)
             self.btn_cutout_edit.setText("✂️ Editing… (click)")
             self.lbl_status.setText(
@@ -806,6 +813,7 @@ class Manga3DAppController(MainWindowUI):
         if not checked:
             return
         self.btn_cutout_edit.setChecked(False)
+        self.btn_cutout_brush.setChecked(False)
         self.btn_cutout_preview.setChecked(True)
         if not self.btn_cutout_preview.isChecked():
             # nessuna immagine su cui piazzarlo
@@ -824,6 +832,7 @@ class Manga3DAppController(MainWindowUI):
         else:
             self.btn_cutout_edit.setChecked(False)
             self.btn_cutout_ring.setChecked(False)
+            self.btn_cutout_brush.setChecked(False)
             self.btn_cutout_preview.setText("👁 Cutout Preview")
             self._update_viewport_mode(self.mode_selector.currentIndex())
 
@@ -880,6 +889,10 @@ class Manga3DAppController(MainWindowUI):
             self.lbl_status.setText(f"📍 Keyring hole placed at ({x}, {y}).")
             return True
 
+        if self.btn_cutout_brush.isChecked():
+            self._brush_paint(x, y)
+            return True
+
         if not self.btn_cutout_edit.isChecked():
             return False
 
@@ -909,6 +922,49 @@ class Manga3DAppController(MainWindowUI):
 
         self._do_refresh_cutout_preview()
         return True
+
+    def _on_cutout_brush_toggled(self, checked):
+        """Il pennello dipinge sul raster di segmentazione, quindi come Edit
+        regions e Place accende l'anteprima: e' l'unica immagine a quella
+        risoluzione."""
+        if not checked:
+            return
+        self.btn_cutout_edit.setChecked(False)
+        self.btn_cutout_ring.setChecked(False)
+        self.btn_cutout_preview.setChecked(True)
+        if not self.btn_cutout_preview.isChecked():
+            self.btn_cutout_brush.setChecked(False)
+            return
+        self.lbl_status.setText(
+            "🖌 Drag on the preview to paint (right-drag pans, wheel zooms). "
+            "Reset clears the brush too.")
+
+    def _brush_paint(self, x, y):
+        if not self.btn_cutout_brush.isChecked():
+            return
+        src = self._cutout_source()
+        if src is None:
+            return
+        shape = seg_shape_for(src.shape[:2], SEG_MAX_RES)
+        if self.cutout_brush is None or self.cutout_brush.shape != shape:
+            self.cutout_brush = np.zeros(shape, np.int8)
+        val = 1 if self.combo_brush_mode.currentIndex() == 0 else -1
+        cv2.circle(self.cutout_brush, (int(x), int(y)),
+                   max(1, self.spin_brush_size.value() // 2), val, -1)
+        # Anteprima ogni ~150 ms mentre si trascina, non a ogni movimento.
+        self._refresh_cutout_preview_throttled()
+
+    def _brush_released(self):
+        if self.btn_cutout_brush.isChecked():
+            self._do_refresh_cutout_preview()
+
+    def _refresh_cutout_preview_throttled(self):
+        if getattr(self, '_brush_timer', None) is None:
+            self._brush_timer = QTimer(self)
+            self._brush_timer.setSingleShot(True)
+            self._brush_timer.timeout.connect(self._do_refresh_cutout_preview)
+        if not self._brush_timer.isActive():
+            self._brush_timer.start(150)
 
     def _region_is_cut(self, regions, lb):
         from engine.cutout_utils import resolve_cut_flags
@@ -1265,6 +1321,7 @@ class Manga3DAppController(MainWindowUI):
         self.cutout_cut_seeds = []
         self.cutout_keep_seeds = []
         self.cutout_paint_mask = None
+        self.cutout_brush = None
         self.cutout_ring_xy = None
         self._invalidate_cutout_regions()
         self.btn_cutout_preview.setEnabled(True)
@@ -1575,6 +1632,7 @@ class Manga3DAppController(MainWindowUI):
             flat_ring_rgb=self._flat_choice_rgb(self.combo_flat_ring),
             cutout_cut_seeds=list(self.cutout_cut_seeds),
             cutout_keep_seeds=list(self.cutout_keep_seeds),
+            cutout_brush=self.cutout_brush,
             cutout_paint_mask=(self.cutout_paint_mask
                                if self.combo_cutout_src.currentIndex() == 1 else None),
             cutout_seg_res=SEG_MAX_RES,

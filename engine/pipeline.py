@@ -571,6 +571,7 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
         cut = compute_cutout(
             img_work, max_dim=p.max_dim, white_clip=p.white_clip,
             seg_res=p.cutout_seg_res, paint_mask=p.cutout_paint_mask,
+            brush=p.cutout_brush,
             cut_seeds=p.cutout_cut_seeds, keep_seeds=p.cutout_keep_seeds,
             border_mm=p.cutout_border_mm,
             min_feature_mm=p.cutout_min_feature_mm,

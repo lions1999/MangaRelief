@@ -12,6 +12,8 @@ from utils import resource_path
 
 class ImageGraphicsView(QGraphicsView):
     pixelClicked = pyqtSignal(int, int) # Ritorna le coordinate X, Y originali
+    pixelDragged = pyqtSignal(int, int) # tasto sinistro premuto e mouse in movimento (pennello)
+    leftReleased = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,10 +49,14 @@ class ImageGraphicsView(QGraphicsView):
             
         qimage = QImage(img_filtered_array.data, w, h, bytes_per_line, fmt)
         pixmap = QPixmap.fromImage(qimage)
+        same_size = self.pixmap_item.pixmap().size() == pixmap.size()
         self.pixmap_item.setPixmap(pixmap)
-        
-        self.scene.setSceneRect(self.pixmap_item.boundingRect())
-        self.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+        # Stessa immagine aggiornata (anteprima mentre si clicca o si dipinge):
+        # lo zoom resta dov'e', o ogni pennellata farebbe saltare la vista.
+        if not same_size:
+            self.scene.setSceneRect(self.pixmap_item.boundingRect())
+            self.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
     def wheelEvent(self, event):
         zoom_in_factor = 1.15
@@ -82,9 +88,16 @@ class ImageGraphicsView(QGraphicsView):
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
             self.pan_start_pos = event.pos()
+        elif event.buttons() & Qt.MouseButton.LeftButton:
+            scene_pos = self.mapToScene(event.pos())
+            x, y = int(scene_pos.x()), int(scene_pos.y())
+            if 0 <= x < self.pixmap_item.pixmap().width() and 0 <= y < self.pixmap_item.pixmap().height():
+                self.pixelDragged.emit(x, y)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.leftReleased.emit()
         if event.button() == Qt.MouseButton.MiddleButton or event.button() == Qt.MouseButton.RightButton:
             self.setCursor(Qt.CursorShape.ArrowCursor)
             self.is_panning = False
@@ -340,6 +353,26 @@ class MainWindowUI(QMainWindow):
         edit_row.addWidget(self.btn_cutout_reset)
         cut_layout.addLayout(edit_row)
 
+        # Pennello: per i contorni aperti, dove una regione "cola" nello sfondo
+        # e il click riempirebbe tutto.
+        brush_row = QHBoxLayout()
+        self.btn_cutout_brush = QPushButton("🖌 Brush")
+        self.btn_cutout_brush.setCheckable(True)
+        self.btn_cutout_brush.setToolTip(
+            "Drag on the cutout preview to paint by hand.\n"
+            "Wins over regions: use it where an open outline leaks into the background.")
+        self.combo_brush_mode = QComboBox()
+        self.combo_brush_mode.addItems(["Add material", "Erase"])
+        self.spin_brush_size = QSpinBox()
+        self.spin_brush_size.setRange(2, 200)
+        self.spin_brush_size.setValue(20)
+        self.spin_brush_size.setSuffix(" px")
+        self.spin_brush_size.setToolTip("Brush diameter, in preview pixels.")
+        brush_row.addWidget(self.btn_cutout_brush)
+        brush_row.addWidget(self.combo_brush_mode)
+        brush_row.addWidget(self.spin_brush_size)
+        cut_layout.addLayout(brush_row)
+
         cut_form = QFormLayout()
 
         self.lbl_cutout_border = QLabel("Sticker border: 0.0 mm")
@@ -388,6 +421,7 @@ class MainWindowUI(QMainWindow):
             self.combo_keychain_finish, self.combo_keychain_print,
             self.chk_flat_face_down, self.spin_flat_layers,
             self.combo_flat_border, self.combo_flat_ring, self.combo_cutout_src,
+            self.btn_cutout_brush, self.combo_brush_mode, self.spin_brush_size,
             self.btn_cutout_paint, self.btn_cutout_edit, self.btn_cutout_reset,
             self.slider_cutout_border, self.chk_cutout_ring,
             self.btn_cutout_ring, self.spin_ring_d, self.btn_cutout_preview,

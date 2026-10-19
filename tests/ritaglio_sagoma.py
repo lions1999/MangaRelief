@@ -475,6 +475,29 @@ for n in ('btn_spot_mockup', 'btn_cutout_preview', 'btn_std_mockup',
     getattr(win, n).setChecked(True)
     check(f"mai due anteprime insieme (acceso {n})", accese() == [n], accese())
 
+# Il pennello: dove un contorno aperto fa colare una regione nello sfondo, il
+# click riempirebbe tutto. Il pennello vince sulle regioni, in entrambi i versi.
+win.btn_cutout_preview.setChecked(False)
+win.btn_cutout_brush.setChecked(True)
+check("il pennello accende l'anteprima e disarma Edit regions",
+      win.btn_cutout_preview.isChecked() and not win.btn_cutout_edit.isChecked())
+win.combo_brush_mode.setCurrentIndex(1)            # Erase
+win.spin_brush_size.setValue(40)
+win.on_pixel_clicked(*P_CUPOLA)
+check("pennello Erase: la cupola (tenuta dalle regioni) diventa vuoto",
+      not win._compute_cutout_now().mask[P_CUPOLA[1], P_CUPOLA[0]])
+win.combo_brush_mode.setCurrentIndex(0)            # Add material
+# una linguetta che parte dalla corona (y~30) e sale nello sfondo: un'isola
+# staccata verrebbe scartata da keep_largest, ed e' giusto cosi'
+for y in range(45, 4, -5):                          # un trascinamento
+    win._brush_paint(450, y)
+check("pennello Add: lo sfondo esterno dipinto diventa materiale",
+      win._compute_cutout_now().mask[12, 450])
+win._reset_cutout()
+check("Reset cancella anche il pennello", win.cutout_brush is None
+      and win._compute_cutout_now().mask[P_CUPOLA[1], P_CUPOLA[0]])
+win.btn_cutout_brush.setChecked(False)
+
 win.btn_cutout_edit.setChecked(True)
 
 # Il click vero, sulle coordinate del raster di segmentazione — che per una
