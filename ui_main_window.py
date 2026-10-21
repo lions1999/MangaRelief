@@ -307,11 +307,18 @@ class MainWindowUI(QMainWindow):
         flat_colors = QHBoxLayout()
         self.combo_flat_border = QComboBox()
         self.combo_flat_ring = QComboBox()
-        for combo, default in ((self.combo_flat_border, 0), (self.combo_flat_ring, 1)):
+        self.combo_flat_body = QComboBox()
+        for combo, default in ((self.combo_flat_body, 0), (self.combo_flat_border, 0),
+                               (self.combo_flat_ring, 1)):
             combo.addItems(["White", "Black", "Accent 1", "Accent 2"])
             combo.setCurrentIndex(default)
         self.combo_flat_border.setToolTip("Colour of the sticker border (Sticker border slider).")
         self.combo_flat_ring.setToolTip("Colour of the keyring loop.")
+        self.combo_flat_body.setToolTip(
+            "Colour of the body under the colour layers: sides and back.\n"
+            "Pick Black for a design on a dark background.")
+        flat_colors.addWidget(QLabel("Body:"))
+        flat_colors.addWidget(self.combo_flat_body)
         flat_colors.addWidget(QLabel("Border:"))
         flat_colors.addWidget(self.combo_flat_border)
         flat_colors.addWidget(QLabel("Ring:"))
@@ -420,7 +427,8 @@ class MainWindowUI(QMainWindow):
         self.cutout_widgets = [
             self.combo_keychain_finish, self.combo_keychain_print,
             self.chk_flat_face_down, self.spin_flat_layers,
-            self.combo_flat_border, self.combo_flat_ring, self.combo_cutout_src,
+            self.combo_flat_border, self.combo_flat_ring, self.combo_flat_body,
+            self.combo_cutout_src,
             self.btn_cutout_brush, self.combo_brush_mode, self.spin_brush_size,
             self.btn_cutout_paint, self.btn_cutout_edit, self.btn_cutout_reset,
             self.slider_cutout_border, self.chk_cutout_ring,

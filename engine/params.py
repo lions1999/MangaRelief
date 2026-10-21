@@ -92,6 +92,8 @@ class GenerationParams:
     # palette Spot. None = come escono dal disegno (bordino bianco, occhiello nero).
     flat_border_rgb: Optional[Tuple[int, int, int]] = None
     flat_ring_rgb: Optional[Tuple[int, int, int]] = None
+    # Colore del corpo (sotto la faccia, fianchi e retro). None = il bianco Spot.
+    flat_body_rgb: Optional[Tuple[int, int, int]] = None
 
     # Le correzioni all'automatismo viaggiano come SEMI, non come raster: una
     # lista di (x, y) che nominano una regione. Le coordinate sono quelle del

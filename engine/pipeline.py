@@ -463,19 +463,21 @@ def _generate_flat(p: GenerationParams, img_work, palette, cutout_mask, emit, ch
                            total_h=flat_total_h(p), face_down=p.flat_face_down)
     check_cancel()
 
-    # I filamenti: il corpo prende il colore di base della palette (il bianco
-    # Spot) ed e' sempre il filamento 1; gli altri seguono nell'ordine della
+    # I filamenti: il corpo prende il colore scelto (di default il bianco
+    # Spot, filamento 1); gli altri seguono nell'ordine della
     # palette, e solo quelli che hanno davvero pixel. Un colore che la pulizia
     # ha cancellato non deve comparire come bobina da caricare.
     hexes = ['#%02x%02x%02x' % tuple(int(v) for v in c) for c in palette]
-    used = sorted({k for k, _ in raw if k != 'body'} | {0})
+    kb = 0 if p.flat_body_rgb is None else int(
+        np.argmin(((pal - np.array(p.flat_body_rgb, dtype=float)) ** 2).sum(axis=1)))
+    used = sorted({k for k, _ in raw if k != 'body'} | {kb})
     filament_of = {k: n for n, k in enumerate(used, start=1)}
     palette_hex = [hexes[k] for k in used]
 
     parts = []
     for k, mesh in raw:
         if k == 'body':
-            parts.append((f"Body {hexes[0]}", mesh, 1))
+            parts.append((f"Body {hexes[kb]}", mesh, filament_of[kb]))
         else:
             parts.append((f"Face {hexes[k]}", mesh, filament_of[k]))
 

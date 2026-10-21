@@ -241,6 +241,14 @@ check("occhiello blu: la faccia blu cresce, la nera cala",
 check("i colori scelti non cambiano l'area totale della faccia",
       abs(sum(scelti.values()) - sum(base.values())) < 1e-6)
 
+# Il corpo di un altro colore: un disegno su fondo scuro vuole fianchi e retro neri.
+r = generate(IMG, params(flat_body_rgb=(20, 20, 20), output_path_3mf=os.path.join(TMP, "corpo.3mf")))
+corpo = [e for nome, hx, e in r.flat_parts if nome.startswith("Body")]
+nero = [e for nome, hx, e in r.flat_parts if nome.startswith("Face") and hx == "#141414"]
+check("corpo nero: stessa bobina della faccia nera",
+      corpo == nero and len(corpo) == 1
+      and any(n == "Body #141414" for n, _, _ in r.flat_parts), r.flat_parts)
+
 print("\n=== RIFIUTI ===")
 try:
     generate(IMG, params(keychain_finish_spot=False))

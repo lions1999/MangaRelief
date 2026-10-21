@@ -1662,6 +1662,7 @@ class Manga3DAppController(MainWindowUI):
             flat_face_down=self.chk_flat_face_down.isChecked(),
             flat_border_rgb=self._flat_choice_rgb(self.combo_flat_border),
             flat_ring_rgb=self._flat_choice_rgb(self.combo_flat_ring),
+            flat_body_rgb=self._flat_choice_rgb(self.combo_flat_body),
             cutout_cut_seeds=list(self.cutout_cut_seeds),
             cutout_keep_seeds=list(self.cutout_keep_seeds),
             cutout_brush=self.cutout_brush,
