@@ -447,7 +447,7 @@ def _generate_flat(p: GenerationParams, img_work, palette, cutout_mask, emit, ch
     img_rgb = downsample_for_analysis(_as_rgb(img_work), p.max_res_cap)
     mask = resize_mask(cutout_mask, img_rgb.shape[:2])
     indices = classify_palette_indices(img_rgb, palette, max_dim=p.max_dim,
-                                       min_feature_mm=0.5)
+                                       min_feature_mm=1.25 * p.nozzle_mm)
     # Bordino e occhiello col colore scelto, dopo la classificazione: in piatto
     # il colore non tocca le quote. L'occhiello dopo il bordino, che lo contiene.
     pal = np.array(palette, dtype=float)
@@ -701,7 +701,8 @@ def generate(image, params: GenerationParams, progress=None, should_cancel=None)
         # Le plate cover sono piccole (~70mm): un dettaglio manga da 0.5mm
         # coprirebbe una frazione enorme del disegno. In incisione il solco è
         # assenza di materiale (non una parete stampata), quindi si può scendere.
-        min_feature = 0.5
+        # 0,5 su ugello 0,4: con uno 0,2 si tiene il doppio del dettaglio
+        min_feature = 1.25 * p.nozzle_mm
         if p.is_cover_mode:
             min_feature = 0.25 if p.cover_engraved else 0.35
 

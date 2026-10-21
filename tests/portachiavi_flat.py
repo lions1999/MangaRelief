@@ -379,5 +379,20 @@ check("fuori dal portachiavi il pannello (e il selettore) non si vedono",
       not win.combo_keychain_print.isVisible() and win.spin_base.isEnabled()
       and win.spin_maxh.isEnabled())
 
+# Un biglietto da visita: sorgente piccola (640 px per 85 mm, 0,13 mm/px) e
+# testo bianco a tratti di 2 px (0,27 mm). La mediana a 5 px se lo mangiava
+# anche con l'ugello 0,2, che quel tratto lo stampa.
+from engine.mesh_utils import classify_palette_indices
+pal = [(245, 245, 245), (20, 20, 20)]
+card = np.ones((416, 640), np.int64)
+for y in range(40, 400, 12):
+    card[y:y + 2, 40:600] = 0                       # righe di "testo" da 2 px
+img = np.array(pal, np.uint8)[card]
+for noz, atteso in ((0.2, True), (0.4, False)):
+    c = classify_palette_indices(img, pal, max_dim=85, min_feature_mm=1.25 * noz)
+    tenuto = ((c == 0) & (card == 0)).sum() / (card == 0).sum()
+    check(f"testo da 0,27 mm con ugello {noz}: {'resta' if atteso else 'sparisce'}",
+          (tenuto > 0.9) == atteso, f"{tenuto:.0%}")
+
 print(f"\n{'OK' if not fails else 'FALLITE: ' + str(len(fails))}")
 sys.exit(1 if fails else 0)

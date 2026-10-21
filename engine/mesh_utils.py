@@ -228,7 +228,15 @@ def classify_palette_indices(image_rgb: np.ndarray, sorted_colors_rgb: list,
     # Applica un filtro mediana per "compattare" le zone di colore e rimuovere il rumore
     # (pixel isolati). Alle risoluzioni alte il kernel scende a 3 per non mangiare
     # le linee fini (a 800px un kernel 5 cancella dettagli sotto ~1.5mm di stampa)
-    indices = median_filter(indices, size=5 if max(h, w) <= 800 else 3)
+    pitch = max_dim / max(h, w)  # mm per pixel
+    # Una mediana di lato k cancella le linee larghe meno di ~k/2 pixel: il
+    # lato si limita in mm, perche' su una sorgente piccola (un biglietto da
+    # 640 px per 85 mm) 5 px sono 0,66 mm e si portavano via il testo.
+    k = 5 if max(h, w) <= 800 else 3
+    lim = int(2 * min_feature_mm / pitch)
+    k = max(1, min(k, lim if lim % 2 else lim - 1))   # dispari, non oltre lim
+    if k > 1:
+        indices = median_filter(indices, size=k)
 
     # --- Pulizia per dimensione minima stampabile (~ugello 0.4mm) ---
     # 1) isole più piccole dell'area di un punto da 0.5mm -> riassegnate al colore
@@ -236,7 +244,6 @@ def classify_palette_indices(image_rgb: np.ndarray, sorted_colors_rgb: list,
     # 2) solo per i colori saturi: componenti senza "nucleo", cioè più strette di
     #    0.5mm ovunque (le frange di ringing JPEG lungo i bordi neri) -> riassegnate.
     #    I colori neutri sono esclusi per preservare le linee fini bianche/nere.
-    pitch = max_dim / max(h, w)  # mm per pixel
     radius_px = max(1, int((min_feature_mm / 2.0) / pitch))
     min_area_px = max(2, int(np.pi * ((min_feature_mm / 2.0) / pitch) ** 2))
     colors_lab = rgb_to_lab(np.array(sorted_colors_rgb, dtype=np.uint8))
