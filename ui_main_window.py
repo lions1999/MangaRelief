@@ -324,6 +324,19 @@ class MainWindowUI(QMainWindow):
         flat_colors.addWidget(QLabel("Ring:"))
         flat_colors.addWidget(self.combo_flat_ring)
         flat_box.addLayout(flat_colors)
+
+        back_row = QHBoxLayout()
+        self.combo_flat_back = QComboBox()
+        self.combo_flat_back.addItems(["None", "Same as front", "Image…"])
+        self.combo_flat_back.setToolTip(
+            "Colour the back too, in the last layers (as many as the front).\n"
+            "Same as front: the drawing repeated, aligned to the outline —\n"
+            "seen from behind it reads mirrored.\n"
+            "Image…: a different picture, as seen from behind. It is stretched\n"
+            "to the piece's bounding box and clipped to its outline.")
+        back_row.addWidget(QLabel("Back:"))
+        back_row.addWidget(self.combo_flat_back, 1)
+        flat_box.addLayout(back_row)
         cut_form_top.addRow(self.flat_options)
         self.flat_options.setVisible(False)
         self._flat_saved_maxh = None   # il Max Z del rilievo a strati, da restituire
@@ -428,6 +441,7 @@ class MainWindowUI(QMainWindow):
             self.combo_keychain_finish, self.combo_keychain_print,
             self.chk_flat_face_down, self.spin_flat_layers,
             self.combo_flat_border, self.combo_flat_ring, self.combo_flat_body,
+            self.combo_flat_back,
             self.combo_cutout_src,
             self.btn_cutout_brush, self.combo_brush_mode, self.spin_brush_size,
             self.btn_cutout_paint, self.btn_cutout_edit, self.btn_cutout_reset,
@@ -831,5 +845,6 @@ class MainWindowUI(QMainWindow):
         """Max Z = corpo + faccia, quando la stampa e' piatta."""
         if not self._flat_active():
             return
-        face = self.spin_flat_layers.value() * self.spin_layer_height.value()
+        sides = 2 if self.combo_flat_back.currentIndex() > 0 else 1
+        face = sides * self.spin_flat_layers.value() * self.spin_layer_height.value()
         self.spin_maxh.setValue(round(self.spin_base.value() + face, 3))

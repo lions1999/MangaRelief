@@ -94,6 +94,11 @@ class GenerationParams:
     flat_ring_rgb: Optional[Tuple[int, int, int]] = None
     # Colore del corpo (sotto la faccia, fianchi e retro). None = il bianco Spot.
     flat_body_rgb: Optional[Tuple[int, int, int]] = None
+    # Retro colorato negli ultimi layer: "none", "same" (lo stesso disegno,
+    # allineato alla sagoma: da dietro si legge allo specchio) o "image"
+    # (flat_back_image, l'immagine come la si guarda da dietro).
+    flat_back: str = "none"
+    flat_back_image: Optional[Any] = None        # ndarray RGB
 
     # Le correzioni all'automatismo viaggiano come SEMI, non come raster: una
     # lista di (x, y) che nominano una regione. Le coordinate sono quelle del
@@ -169,6 +174,8 @@ class GenerationParams:
         pm = d.get('cutout_paint_mask')
         if pm is not None:
             d['cutout_paint_mask'] = f"<mask {getattr(self.cutout_paint_mask, 'shape', '?')}>"
+        if d.get('flat_back_image') is not None:
+            d['flat_back_image'] = f"<image {getattr(self.flat_back_image, 'shape', '?')}>"
         if d.get('cutout_brush') is not None:
             d['cutout_brush'] = f"<brush {getattr(self.cutout_brush, 'shape', '?')}>"
         return d

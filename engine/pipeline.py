@@ -404,6 +404,8 @@ def _check_flat_params(p: GenerationParams):
         raise ValueError("Flat AMS printing needs the Spot Color finish.")
     if p.flat_face_layers < 1:
         raise ValueError("Flat AMS printing needs at least 1 colour layer.")
+    if p.flat_back == "image" and p.flat_back_image is None:
+        raise ValueError("Back image selected but no image loaded.")
     # La Base e' il corpo bianco: sotto due layer non regge lo strappo
     # dell'anellino, e la faccia colorata sopra sarebbe tutto il pezzo.
     if p.base_h < 2 * p.layer_height - 1e-6:
@@ -416,7 +418,8 @@ def flat_total_h(p: GenerationParams) -> float:
     """Lo spessore del pezzo piatto: il corpo (Base) piu' i layer colorati.
     Max Z non si legge: in questa stampa e' una conseguenza, e la UI la
     mostra spenta con questo stesso valore."""
-    return round(p.base_h + p.flat_face_layers * p.layer_height, 3)
+    sides = 2 if p.flat_back != "none" else 1
+    return round(p.base_h + sides * p.flat_face_layers * p.layer_height, 3)
 
 
 def flat_filament_changes(n_face_colors: int, face_layers: int) -> int:
@@ -450,17 +453,41 @@ def _generate_flat(p: GenerationParams, img_work, palette, cutout_mask, emit, ch
                                        min_feature_mm=1.25 * p.nozzle_mm)
     # Bordino e occhiello col colore scelto, dopo la classificazione: in piatto
     # il colore non tocca le quote. L'occhiello dopo il bordino, che lo contiene.
+    back = None
+    if p.flat_back == "image":
+        # Stessa palette (dipende solo dagli accenti), stesso reticolo.
+        # shortcut: l'immagine si stira sul riquadro del pezzo; con un
+        # aspetto diverso esce deformata — servirebbe un adattamento a cover.
+        h, w = indices.shape
+        b = cv2.resize(_as_rgb(p.flat_back_image), (w, h), interpolation=cv2.INTER_AREA)
+        _, b_idx = classify_spot_pixels(b, p.spot_accents, coverage=p.spot_coverage,
+                                        white_clip=p.white_clip, black_clip=p.black_clip)
+        b_img = np.array(palette, dtype=np.uint8)[b_idx]
+        back = classify_palette_indices(b_img, palette, max_dim=p.max_dim,
+                                        min_feature_mm=1.25 * p.nozzle_mm)
+        # Il retro si guarda dall'altra parte: nel sistema del fronte va
+        # specchiato perche' si legga dritto.
+        back = np.ascontiguousarray(back[:, ::-1])
+
     pal = np.array(palette, dtype=float)
     for zona, rgb in ((border, p.flat_border_rgb), (ring, p.flat_ring_rgb)):
         if zona is not None and rgb is not None and zona.any():
             k = int(np.argmin(((pal - np.array(rgb, dtype=float)) ** 2).sum(axis=1)))
-            indices[resize_mask(zona, indices.shape) & mask] = k
+            zm = resize_mask(zona, indices.shape) & mask
+            indices[zm] = k
+            if back is not None:
+                back[zm] = k
+    if p.flat_back == "same":
+        # allineato alla sagoma, quindi da dietro allo specchio: con una
+        # sagoma asimmetrica e' l'unico modo perche' combaci
+        back = indices.copy()
     check_cancel()
 
     face_depth = round(p.flat_face_layers * p.layer_height, 3)
     emit(40, "🧱 Building colour faces and body...")
     raw = build_flat_parts(indices, mask, p.max_dim, face_depth=face_depth,
-                           total_h=flat_total_h(p), face_down=p.flat_face_down)
+                           total_h=flat_total_h(p), face_down=p.flat_face_down,
+                           back_indices=back)
     check_cancel()
 
     # I filamenti: il corpo prende il colore scelto (di default il bianco
@@ -470,7 +497,10 @@ def _generate_flat(p: GenerationParams, img_work, palette, cutout_mask, emit, ch
     hexes = ['#%02x%02x%02x' % tuple(int(v) for v in c) for c in palette]
     kb = 0 if p.flat_body_rgb is None else int(
         np.argmin(((pal - np.array(p.flat_body_rgb, dtype=float)) ** 2).sum(axis=1)))
-    used = sorted({k for k, _ in raw if k != 'body'} | {kb})
+    # il retro usa le stesse bobine del fronte: un colore, un filamento
+    front = [k for k, _ in raw if isinstance(k, int)]
+    rear = [k[1] for k, _ in raw if isinstance(k, tuple)]
+    used = sorted(set(front) | set(rear) | {kb})
     filament_of = {k: n for n, k in enumerate(used, start=1)}
     palette_hex = [hexes[k] for k in used]
 
@@ -478,14 +508,16 @@ def _generate_flat(p: GenerationParams, img_work, palette, cutout_mask, emit, ch
     for k, mesh in raw:
         if k == 'body':
             parts.append((f"Body {hexes[kb]}", mesh, filament_of[kb]))
+        elif isinstance(k, tuple):
+            parts.append((f"Back {hexes[k[1]]}", mesh, filament_of[k[1]]))
         else:
             parts.append((f"Face {hexes[k]}", mesh, filament_of[k]))
 
     result = GenerationResult()
     result.slot_colors = palette_hex[1:]
     result.flat_parts = [(nome, palette_hex[e - 1], e) for nome, _, e in parts]
-    n_face_colors = len([k for k, _ in raw if k != 'body'])
-    result.flat_filament_changes = flat_filament_changes(n_face_colors, p.flat_face_layers)
+    result.flat_filament_changes = (flat_filament_changes(len(front), p.flat_face_layers)
+                                    + flat_filament_changes(len(rear), p.flat_face_layers))
 
     emit(80, "💾 Exporting multi-part 3MF...")
     if p.output_path_3mf:

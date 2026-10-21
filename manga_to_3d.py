@@ -72,6 +72,7 @@ class Manga3DAppController(MainWindowUI):
         self.cutout_brush = None
         self.cutout_ring_xy = None
         self._cutout_regions = None
+        self.flat_back_image = None
         self._cutout_regions_key = None
 
         # Phone Cover state
@@ -139,6 +140,7 @@ class Manga3DAppController(MainWindowUI):
         self.btn_cutout_edit.toggled.connect(self._on_cutout_edit_toggled)
         self.btn_cutout_brush.toggled.connect(self._on_cutout_brush_toggled)
         QShortcut(QKeySequence.StandardKey.Undo, self, activated=self._undo_cutout)
+        self.combo_flat_back.currentIndexChanged.connect(self._on_flat_back_changed)
         self.btn_cutout_reset.clicked.connect(self._reset_cutout)
         self.btn_cutout_preview.toggled.connect(self._on_cutout_preview_toggled)
         self.slider_cutout_border.valueChanged.connect(self._on_cutout_border_changed)
@@ -742,6 +744,24 @@ class Manga3DAppController(MainWindowUI):
                 "drawing (between a cloud and the hat, inside a curl) stay solid: "
                 "turn on Edit regions and click inside the ones to punch out.")
         self._refresh_cutout_preview()
+
+    def _on_flat_back_changed(self, idx):
+        """Image… apre il file; annullato o illeggibile, si torna a None."""
+        if idx == 2:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Open back image", self.last_opened_dir,
+                "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tiff);;All Files (*.*)")
+            bgr = cv2.imread(path) if path else None
+            if bgr is None:
+                if path:
+                    QMessageBox.critical(self, "Decoder Error", "Unreadable back image.")
+                self.combo_flat_back.setCurrentIndex(0)
+                return
+            self.flat_back_image = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            self.lbl_status.setText(f"✅ Back image loaded: {os.path.basename(path)}")
+        else:
+            self.flat_back_image = None
+        self._sync_flat_maxh()
 
     def _load_paint_mask(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -1356,6 +1376,8 @@ class Manga3DAppController(MainWindowUI):
         self.cutout_brush = None
         self.cutout_ring_xy = None
         self._invalidate_cutout_regions()
+        # il retro appartiene al fronte di prima
+        self.combo_flat_back.setCurrentIndex(0)
         self.btn_cutout_preview.setEnabled(True)
         self._update_viewport_mode(self.mode_selector.currentIndex())
 
@@ -1663,6 +1685,8 @@ class Manga3DAppController(MainWindowUI):
             flat_border_rgb=self._flat_choice_rgb(self.combo_flat_border),
             flat_ring_rgb=self._flat_choice_rgb(self.combo_flat_ring),
             flat_body_rgb=self._flat_choice_rgb(self.combo_flat_body),
+            flat_back=("none", "same", "image")[self.combo_flat_back.currentIndex()],
+            flat_back_image=self.flat_back_image,
             cutout_cut_seeds=list(self.cutout_cut_seeds),
             cutout_keep_seeds=list(self.cutout_keep_seeds),
             cutout_brush=self.cutout_brush,
@@ -1853,6 +1877,9 @@ class Manga3DAppController(MainWindowUI):
                      "PEI plate gives the front its finish.\n")
         else:
             verso = "Face up: the colours are in the top layers.\n"
+        if self.combo_flat_back.currentIndex() > 0:
+            verso += (f"Two-sided: the back takes the other {layers} colour layers.\n"
+                      "Ironing on the top surface makes it smoother.\n")
         return (
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"🎨  BAMBU STUDIO — Flat AMS\n"

@@ -424,7 +424,8 @@ def extrude_polygons(polys: list, z0: float, z1: float) -> trimesh.Trimesh:
 
 
 def build_flat_parts(indices: np.ndarray, mask: np.ndarray, max_dim: float,
-                     face_depth: float, total_h: float, face_down: bool = True):
+                     face_depth: float, total_h: float, face_down: bool = True,
+                     back_indices: np.ndarray = None):
     """Le parti della stampa piatta: una "faccia" per colore, alta face_depth,
     e un corpo sotto (o sopra) che porta il pezzo a total_h.
 
@@ -437,6 +438,11 @@ def build_flat_parts(indices: np.ndarray, mask: np.ndarray, max_dim: float,
     e con la sua texture, e i colori sono tutti nei primi layer. Guardata dal
     piatto pero' l'immagine e' allo specchio — quindi qui la si specchia in X,
     perche' esca dritta una volta girato il pezzo.
+
+    back_indices: il retro, alto anch'esso face_depth, dall'altra parte del
+    corpo. Sullo stesso reticolo e nello stesso sistema di `indices`: chi
+    chiama lo ha gia' specchiato se va letto dritto da dietro. Chiavi
+    ('back', indice).
     """
     from shapely import affinity
     h, w = indices.shape
@@ -453,16 +459,21 @@ def build_flat_parts(indices: np.ndarray, mask: np.ndarray, max_dim: float,
         from shapely.geometry.polygon import orient
         return extrude_polygons([orient(p) for p in polys], z0, z1)
 
-    if face_down:
-        face_z, body_z = (0.0, face_depth), (face_depth, total_h)
-    else:
-        face_z, body_z = (total_h - face_depth, total_h), (0.0, total_h - face_depth)
+    low, high = (0.0, face_depth), (total_h - face_depth, total_h)
+    face_z, back_z = (low, high) if face_down else (high, low)
+    two = back_indices is not None
+    body_z = (face_depth if face_down or two else 0.0,
+              total_h - face_depth if two or not face_down else total_h)
 
     parts = []
-    for i in np.unique(indices[mask]).tolist():
-        m = mask & (indices == i)
-        if m.any():
-            parts.append((int(i), solido(m, *face_z)))
+    sides = [(lambda i: int(i), indices, face_z)]
+    if back_indices is not None:
+        sides.append((lambda i: ('back', int(i)), back_indices, back_z))
+    for key, idx, z in sides:
+        for i in np.unique(idx[mask]).tolist():
+            m = mask & (idx == i)
+            if m.any():
+                parts.append((key(i), solido(m, *z)))
     parts.append(('body', solido(mask, *body_z)))
     return parts
 

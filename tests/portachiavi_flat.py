@@ -249,6 +249,47 @@ check("corpo nero: stessa bobina della faccia nera",
       corpo == nero and len(corpo) == 1
       and any(n == "Body #141414" for n, _, _ in r.flat_parts), r.flat_parts)
 
+print("\n=== FRONTE E RETRO ===")
+
+
+def per_nome(r):
+    _, ms, _, pp, _, _ = leggi_3mf(r.mf3_path)
+    return {pp[k]["name"]: m for k, m in ms.items()}
+
+
+uguale = per_nome(generate(IMG, params(flat_back="same",
+                                       output_path_3mf=os.path.join(TMP, "fr_same.3mf"))))
+facce = {n[5:]: m for n, m in uguale.items() if n.startswith("Face")}
+retro = {n[5:]: m for n, m in uguale.items() if n.startswith("Back")}
+corpo = uguale[[n for n in uguale if n.startswith("Body")][0]]
+check("Same as front: un retro per ogni colore della faccia, stessa area",
+      facce.keys() == retro.keys()
+      and all(abs(facce[c].volume - retro[c].volume) < 1e-6 for c in facce), sorted(retro))
+z0 = min(m.bounds[0][2] for m in uguale.values())   # il 3MF centra il pezzo in Z
+zf = [round(v - z0, 3) for v in (min(m.bounds[0][2] for m in facce.values()),
+                                 max(m.bounds[1][2] for m in facce.values()))]
+zr = [round(v - z0, 3) for v in (min(m.bounds[0][2] for m in retro.values()),
+                                 max(m.bounds[1][2] for m in retro.values()))]
+zc = [round(v - z0, 3) for v in corpo.bounds[:, 2]]
+check("fronte nei primi layer, corpo in mezzo, retro negli ultimi",
+      zf == [0, round(FACE, 3)] and zr == [round(BASE + FACE, 3), round(BASE + 2 * FACE, 3)]
+      and zc == [round(FACE, 3), round(BASE + FACE, 3)], (zf, zr, zc))
+cx = corpo.bounds[:, 0].mean()
+check("Same as front: il retro e' allineato alla sagoma (rosso dallo stesso lato del fronte)",
+      retro["#dc1e1e"].centroid[0] > cx and facce["#dc1e1e"].centroid[0] > cx)
+
+# Image: l'immagine e' quella vista da dietro. Con lo stesso disegno il rosso,
+# guardando il retro dall'alto, deve stare a SINISTRA come nel file.
+img_r = per_nome(generate(IMG, params(flat_back="image", flat_back_image=IMG,
+                                      output_path_3mf=os.path.join(TMP, "fr_img.3mf"))))
+check("Image: il retro si legge dritto da dietro (rosso a sinistra)",
+      img_r["Back #dc1e1e"].centroid[0] < cx, img_r["Back #dc1e1e"].centroid[0])
+try:
+    generate(IMG, params(flat_back="image"))
+    check("Image senza immagine viene rifiutato", False)
+except ValueError as e:
+    check("Image senza immagine viene rifiutato", "Back image" in str(e), e)
+
 print("\n=== RIFIUTI ===")
 try:
     generate(IMG, params(keychain_finish_spot=False))
@@ -380,6 +421,13 @@ check("la seconda generazione apre una cartella nuova, non sovrascrive",
               for f in os.listdir(cartelle[1])), cartelle)
 check("il 3MF resta in output/3mf, fuori dalle cartelle",
       os.path.dirname(win.worker.params.output_path_3mf) == os.path.join(TMP, "output", "3mf"))
+
+win.combo_flat_back.setCurrentIndex(1)                # Same as front
+due = round(win.spin_base.value() + 2 * win.spin_flat_layers.value()
+            * win.spin_layer_height.value(), 3)
+check("col retro Max Z conta i layer colorati due volte",
+      abs(win.spin_maxh.value() - due) < 1e-6, (win.spin_maxh.value(), due))
+win.combo_flat_back.setCurrentIndex(0)
 
 win.mode_selector.setCurrentIndex(3)
 app.processEvents()
